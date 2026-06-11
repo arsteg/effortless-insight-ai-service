@@ -20,6 +20,7 @@ WORKDIR /app
 # Install runtime dependencies (for pdf2image)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     poppler-utils \
+    libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
@@ -31,10 +32,16 @@ RUN pip install --no-cache /wheels/*
 
 # Copy application code
 COPY app/ ./app/
+COPY alembic/ ./alembic/
+COPY alembic.ini .
 
 # Set ownership
 RUN chown -R appuser:appuser /app
 USER appuser
+
+# Environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
 
 # Expose port
 EXPOSE 8000
