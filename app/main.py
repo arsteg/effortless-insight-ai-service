@@ -10,7 +10,7 @@ import sentry_sdk
 import structlog
 
 from app.core.config import settings
-from app.core.logging import setup_logging
+from app.core.log_config import setup_logging
 from app.api import router as api_router
 from app.core.database import init_db
 
