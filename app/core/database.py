@@ -43,11 +43,97 @@ def get_session_maker() -> async_sessionmaker:
 
 
 async def init_db():
-    """Initialize database connection"""
+    """Initialize database connection and create tables"""
     engine = get_engine()
     async with engine.begin() as conn:
         # Enable pgvector extension
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+
+        # Create embeddings table if it doesn't exist
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS embeddings (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                source_type VARCHAR(50) NOT NULL,
+                source_id UUID NOT NULL,
+                organization_id UUID,
+                content_hash VARCHAR(64) NOT NULL,
+                chunk_index INTEGER NOT NULL DEFAULT 0,
+                content TEXT NOT NULL,
+                embedding vector(3072) NOT NULL,
+                metadata JSONB NOT NULL DEFAULT '{}',
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        """))
+
+        # Create indexes if they don't exist
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_embeddings_source_type ON embeddings(source_type)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_embeddings_source_id ON embeddings(source_id)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_embeddings_organization_id ON embeddings(organization_id)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_embeddings_content_hash ON embeddings(content_hash)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_embeddings_source ON embeddings(source_type, source_id)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_embeddings_org_source ON embeddings(organization_id, source_type)
+        """))
+
+        # Note: Skipping vector index creation because:
+        # - HNSW and IVFFlat have a 2000 dimension limit in pgvector
+        # - text-embedding-3-large produces 3072 dimensions
+        # - For small knowledge bases (<1000 entries), exact search is fast enough
+        # - If scaling up, consider using text-embedding-3-small (1536 dims) instead
+
+        # Create knowledge_base_entries table if it doesn't exist
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS knowledge_base_entries (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                source_type VARCHAR(50) NOT NULL,
+                reference VARCHAR(255) NOT NULL UNIQUE,
+                title VARCHAR(500) NOT NULL,
+                content TEXT NOT NULL,
+                summary TEXT,
+                effective_date DATE,
+                expiry_date DATE,
+                authority VARCHAR(255),
+                keywords TEXT[] NOT NULL DEFAULT '{}',
+                categories TEXT[] NOT NULL DEFAULT '{}',
+                related_sections TEXT[] NOT NULL DEFAULT '{}',
+                related_rules TEXT[] NOT NULL DEFAULT '{}',
+                supersedes VARCHAR(255),
+                metadata JSONB NOT NULL DEFAULT '{}',
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                is_indexed BOOLEAN NOT NULL DEFAULT FALSE,
+                version INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        """))
+
+        # Create indexes for knowledge_base_entries
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_kb_source_type ON knowledge_base_entries(source_type)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_kb_is_active ON knowledge_base_entries(is_active)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_kb_is_indexed ON knowledge_base_entries(is_indexed)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_kb_source_active ON knowledge_base_entries(source_type, is_active)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_kb_reference ON knowledge_base_entries(reference)
+        """))
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
