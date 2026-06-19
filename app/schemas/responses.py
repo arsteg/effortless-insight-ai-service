@@ -5,7 +5,7 @@ API response schemas - using camelCase for .NET compatibility
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 from datetime import date
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 def to_camel(string: str) -> str:
@@ -34,11 +34,51 @@ class ActionItem(CamelCaseModel):
     due_in_days: Optional[int] = Field(None, description="Days until due")
     assignee_suggestion: Optional[str] = Field(None, description="Suggested assignee type")
 
+    @field_validator('priority', mode='before')
+    @classmethod
+    def parse_priority(cls, v):
+        """Handle LLM returning priority as string"""
+        if isinstance(v, str):
+            try:
+                return int(v)
+            except ValueError:
+                return 5  # Default to medium priority
+        return v
+
+    @field_validator('due_in_days', mode='before')
+    @classmethod
+    def parse_null_int(cls, v):
+        """Handle LLM returning 'null' as string instead of JSON null"""
+        if v is None or v == "null" or v == "":
+            return None
+        if isinstance(v, str):
+            try:
+                return int(v)
+            except ValueError:
+                return None
+        return v
+
+    @field_validator('assignee_suggestion', mode='before')
+    @classmethod
+    def parse_null_string(cls, v):
+        """Handle LLM returning 'null' as string instead of JSON null"""
+        if v == "null" or v == "":
+            return None
+        return v
+
 
 class RequiredDocument(CamelCaseModel):
     """Required document for notice response"""
     document: str = Field(..., description="Document name")
     mandatory: bool = Field(..., description="Whether the document is mandatory")
+
+    @field_validator('mandatory', mode='before')
+    @classmethod
+    def parse_bool(cls, v):
+        """Handle LLM returning boolean as string"""
+        if isinstance(v, str):
+            return v.lower() in ('true', 'yes', '1')
+        return v
 
 
 class LegalReference(CamelCaseModel):
@@ -62,6 +102,35 @@ class NoticeMetadata(CamelCaseModel):
     period_to: Optional[date] = Field(None, description="End of tax period")
     issuing_authority: Optional[str] = Field(None, description="Issuing authority name")
 
+    @field_validator('notice_type', 'notice_category', 'notice_number', 'gstin', 'issuing_authority', mode='before')
+    @classmethod
+    def parse_null_string(cls, v):
+        """Handle LLM returning 'null' as string instead of JSON null"""
+        if v == "null" or v == "":
+            return None
+        return v
+
+    @field_validator('tax_amount', 'penalty_amount', 'interest_amount', mode='before')
+    @classmethod
+    def parse_null_float(cls, v):
+        """Handle LLM returning 'null' as string instead of JSON null"""
+        if v is None or v == "null" or v == "":
+            return None
+        if isinstance(v, str):
+            try:
+                return float(v)
+            except ValueError:
+                return None
+        return v
+
+    @field_validator('issue_date', 'response_deadline', 'period_from', 'period_to', mode='before')
+    @classmethod
+    def parse_null_date(cls, v):
+        """Handle LLM returning 'null' as string instead of JSON null"""
+        if v is None or v == "null" or v == "":
+            return None
+        return v
+
 
 class AiReportData(CamelCaseModel):
     """Complete AI analysis report"""
@@ -75,6 +144,17 @@ class AiReportData(CamelCaseModel):
     required_documents: List[RequiredDocument] = Field(default_factory=list, description="Required documents")
     legal_references: List[LegalReference] = Field(default_factory=list, description="Relevant legal references")
     confidence_scores: Dict[str, int] = Field(default_factory=dict, description="Confidence scores for each field")
+
+    @field_validator('risk_score', mode='before')
+    @classmethod
+    def parse_risk_score(cls, v):
+        """Handle LLM returning risk_score as string"""
+        if isinstance(v, str):
+            try:
+                return int(v)
+            except ValueError:
+                return 50  # Default to medium risk
+        return v
 
 
 class AiProcessingResult(CamelCaseModel):
