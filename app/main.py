@@ -12,6 +12,10 @@ import structlog
 from app.core.config import settings
 from app.core.log_config import setup_logging
 from app.api import router as api_router
+from app.api.middleware.auth import APIKeyMiddleware
+from app.api.middleware.logging import RequestLoggingMiddleware
+from app.api.middleware.metrics import MetricsMiddleware
+from app.api.middleware.error_handler import ErrorHandlerMiddleware
 from app.core.database import init_db
 
 # Setup logging
@@ -50,7 +54,20 @@ app = FastAPI(
     redoc_url="/redoc" if settings.environment == "development" else None,
 )
 
-# Add CORS middleware
+# Add middleware (order matters - first added = outermost)
+# Error handler should be outermost to catch all errors
+app.add_middleware(ErrorHandlerMiddleware)
+
+# Metrics middleware for request timing
+app.add_middleware(MetricsMiddleware)
+
+# Request logging
+app.add_middleware(RequestLoggingMiddleware)
+
+# API key authentication (after logging so we log auth failures)
+app.add_middleware(APIKeyMiddleware)
+
+# CORS middleware (innermost for preflight handling)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
