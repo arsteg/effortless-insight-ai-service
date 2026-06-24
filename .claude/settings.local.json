@@ -6,7 +6,11 @@
       "Bash(npm run test:*)",
       "Bash(npm test:*)",
       "Bash(find:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(dir \"C:\\\\Work\\\\EffortlessInsight\\\\apps\\\\effortless-insight-admin\\\\nul\")",
+      "Bash(dir:*)",
+      "Bash(npx next dev --help:*)",
+      "Bash(tree:*)"
     ]
   }
 }
