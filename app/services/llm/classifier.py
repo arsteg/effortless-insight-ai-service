@@ -109,43 +109,41 @@ class NoticeClassifier:
         return None, "other", 0.5
 
     def _pattern_classify(self, text: str) -> Optional[str]:
-        """Try to classify using regex patterns"""
-        import re
+        """
+        Try to classify using regex patterns.
 
-        patterns = {
-            r'DRC[\-\s]?01': "DRC-01",
-            r'DRC[\-\s]?07': "DRC-07",
-            r'DRC[\-\s]?13': "DRC-13",
-            r'ASMT[\-\s]?10': "ASMT-10",
-            r'ASMT[\-\s]?12': "ASMT-12",
-            r'ASMT[\-\s]?14': "ASMT-14",
-            r'REG[\-\s]?17': "REG-17",
-            r'REG[\-\s]?19': "REG-19",
-            r'ADT[\-\s]?01': "ADT-01",
-            r'GSTR[\-\s]?3A': "GSTR-3A",
-            r'RET[\-\s]?01': "RET-01",
-        }
+        Supports 100+ GST form types across all categories:
+        - Demand & Recovery (DRC-01 to DRC-25)
+        - Assessment (ASMT-01 to ASMT-18)
+        - Registration (REG-01 to REG-31)
+        - Audit (ADT-01 to ADT-04)
+        - Returns (GSTR-1 to GSTR-11, RET-01 to RET-03)
+        - Refund (RFD-01 to RFD-11)
+        - Appeal (APL-01 to APL-08)
+        - Inspection (INS-01 to INS-05)
+        - E-Way Bill (EWB-01 to EWB-04, MOV-01 to MOV-11)
+        - ITC (ITC-01 to ITC-04, PMT-01 to PMT-09)
+        - Composition (CMP-01 to CMP-08)
+        """
+        import re
+        from app.services.llm.notice_patterns import ALL_PATTERNS
 
         text_upper = text.upper()
-        for pattern, notice_type in patterns.items():
+
+        # Try all patterns from the comprehensive patterns module
+        for pattern, notice_type, category, description in ALL_PATTERNS:
             if re.search(pattern, text_upper, re.IGNORECASE):
+                logger.debug(
+                    "Pattern matched",
+                    pattern=pattern,
+                    notice_type=notice_type,
+                    category=category
+                )
                 return notice_type
 
         return None
 
     def _type_to_category(self, notice_type: str) -> str:
-        """Map notice type to category"""
-        mapping = {
-            "DRC-01": "demand",
-            "DRC-07": "demand",
-            "DRC-13": "demand",
-            "ASMT-10": "assessment",
-            "ASMT-12": "assessment",
-            "ASMT-14": "assessment",
-            "REG-17": "registration",
-            "REG-19": "registration",
-            "ADT-01": "audit",
-            "GSTR-3A": "returns",
-            "RET-01": "returns",
-        }
-        return mapping.get(notice_type, "other")
+        """Map notice type to category using comprehensive mapping"""
+        from app.services.llm.notice_patterns import TYPE_TO_CATEGORY
+        return TYPE_TO_CATEGORY.get(notice_type, "other")

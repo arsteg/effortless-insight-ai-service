@@ -144,17 +144,39 @@ async def generate_response(
     try:
         analyzer = NoticeAnalyzer()
 
-        # TODO: Fetch notice details from database
-        # For now, use provided context
-        context_str = ""
+        # Fetch notice details from database
+        notice_data = await _fetch_notice_details(db, request.notice_id)
+
+        # Build context from database and request
+        context_parts = []
         if request.context:
-            context_str = str(request.context)
+            context_parts.append(str(request.context))
+
+        # Use notice data from database if available
+        notice_summary = "Notice requiring response"
+        notice_type = request.context.get("notice_type") if request.context else None
+        deadline = request.context.get("deadline") if request.context else None
+        key_issues = request.context.get("issues") if request.context else None
+
+        if notice_data:
+            if notice_data.get("summary"):
+                notice_summary = notice_data["summary"]
+            if notice_data.get("notice_type") and not notice_type:
+                notice_type = notice_data["notice_type"]
+            if notice_data.get("response_deadline") and not deadline:
+                deadline = notice_data["response_deadline"]
+            if notice_data.get("key_issues"):
+                context_parts.append(f"Key Issues: {notice_data['key_issues']}")
+            if notice_data.get("ai_report_summary"):
+                context_parts.append(f"AI Analysis: {notice_data['ai_report_summary']}")
+
+        context_str = "\n".join(context_parts) if context_parts else ""
 
         draft = await analyzer.generate_response_draft(
-            notice_summary="Notice requiring response",  # Would come from DB
-            notice_type=request.context.get("notice_type") if request.context else None,
-            deadline=request.context.get("deadline") if request.context else None,
-            key_issues=request.context.get("issues") if request.context else None,
+            notice_summary=notice_summary,
+            notice_type=notice_type,
+            deadline=deadline,
+            key_issues=key_issues,
             context=context_str,
         )
 
@@ -170,6 +192,62 @@ async def generate_response(
             error=str(e)
         )
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _fetch_notice_details(db: AsyncSession, notice_id: UUID) -> dict | None:
+    """
+    Fetch notice details from database for response generation.
+
+    Returns notice summary, type, deadline, and AI report details.
+    """
+    try:
+        from sqlalchemy import text
+
+        query = text("""
+            SELECT
+                n.notice_number,
+                n.notice_type,
+                n.notice_category,
+                n.status,
+                n.response_deadline,
+                n.total_demand,
+                n.gstin,
+                ar.summary_en as ai_report_summary,
+                ar.plain_english,
+                ar.risk_level
+            FROM notices n
+            LEFT JOIN ai_reports ar ON ar.notice_id = n.id
+            WHERE n.id = :notice_id
+            LIMIT 1
+        """)
+
+        result = await db.execute(query, {"notice_id": str(notice_id)})
+        row = result.fetchone()
+
+        if not row:
+            logger.warning("Notice not found in database", notice_id=str(notice_id))
+            return None
+
+        return {
+            "notice_number": row.notice_number,
+            "notice_type": row.notice_type,
+            "notice_category": row.notice_category,
+            "status": row.status,
+            "response_deadline": str(row.response_deadline) if row.response_deadline else None,
+            "total_demand": float(row.total_demand) if row.total_demand else None,
+            "gstin": row.gstin,
+            "summary": row.ai_report_summary or row.plain_english,
+            "ai_report_summary": row.ai_report_summary,
+            "risk_level": row.risk_level,
+        }
+
+    except Exception as e:
+        logger.warning(
+            "Failed to fetch notice details from database",
+            notice_id=str(notice_id),
+            error=str(e)
+        )
+        return None
 
 
 @router.post("/similar", response_model=SimilarNoticesResponse)

@@ -1,11 +1,12 @@
 """
-Pipeline orchestrator for notice processing
+Pipeline orchestrator for notice processing with performance monitoring
 """
 
 import time
-from typing import Optional
+from typing import Optional, Dict, List
 from uuid import UUID
 from datetime import datetime
+from dataclasses import dataclass, field
 import structlog
 
 from app.schemas.internal import (
@@ -26,6 +27,126 @@ from app.services.verification.verifier import Verifier
 from app.services.scoring.risk_scorer import RiskScorer
 
 logger = structlog.get_logger()
+
+
+@dataclass
+class StageMetrics:
+    """Metrics for a single pipeline stage"""
+    stage_name: str
+    start_time: float = 0.0
+    end_time: float = 0.0
+    duration_ms: int = 0
+    success: bool = True
+    error: Optional[str] = None
+    metadata: Dict = field(default_factory=dict)
+
+    def complete(self, success: bool = True, error: Optional[str] = None, **metadata):
+        self.end_time = time.time()
+        self.duration_ms = int((self.end_time - self.start_time) * 1000)
+        self.success = success
+        self.error = error
+        self.metadata = metadata
+
+
+@dataclass
+class PipelineMetrics:
+    """Aggregated metrics for the entire pipeline run"""
+    notice_id: str
+    organization_id: Optional[str] = None
+    start_time: float = 0.0
+    end_time: float = 0.0
+    total_duration_ms: int = 0
+    stages: List[StageMetrics] = field(default_factory=list)
+    success: bool = True
+    error_stage: Optional[str] = None
+    error_message: Optional[str] = None
+
+    def add_stage(self, name: str) -> StageMetrics:
+        stage = StageMetrics(stage_name=name, start_time=time.time())
+        self.stages.append(stage)
+        return stage
+
+    def complete(self, success: bool = True, error_stage: Optional[str] = None, error_message: Optional[str] = None):
+        self.end_time = time.time()
+        self.total_duration_ms = int((self.end_time - self.start_time) * 1000)
+        self.success = success
+        self.error_stage = error_stage
+        self.error_message = error_message
+
+    def to_dict(self) -> Dict:
+        return {
+            "notice_id": self.notice_id,
+            "organization_id": self.organization_id,
+            "total_duration_ms": self.total_duration_ms,
+            "success": self.success,
+            "error_stage": self.error_stage,
+            "error_message": self.error_message,
+            "stages": [
+                {
+                    "name": s.stage_name,
+                    "duration_ms": s.duration_ms,
+                    "success": s.success,
+                    "error": s.error,
+                    **s.metadata
+                }
+                for s in self.stages
+            ],
+            "stage_breakdown": {
+                s.stage_name: s.duration_ms for s in self.stages
+            }
+        }
+
+
+class MetricsCollector:
+    """Collects and exports pipeline metrics"""
+
+    def __init__(self):
+        self._recent_metrics: List[PipelineMetrics] = []
+        self._max_history = 100
+
+    def record(self, metrics: PipelineMetrics):
+        """Record completed pipeline metrics"""
+        self._recent_metrics.append(metrics)
+        if len(self._recent_metrics) > self._max_history:
+            self._recent_metrics = self._recent_metrics[-self._max_history:]
+
+        # Log detailed metrics
+        logger.info(
+            "pipeline_metrics",
+            notice_id=metrics.notice_id,
+            total_duration_ms=metrics.total_duration_ms,
+            success=metrics.success,
+            stages=metrics.to_dict()["stage_breakdown"]
+        )
+
+    def get_recent_metrics(self, limit: int = 10) -> List[Dict]:
+        """Get recent pipeline metrics"""
+        return [m.to_dict() for m in self._recent_metrics[-limit:]]
+
+    def get_average_stage_times(self) -> Dict[str, float]:
+        """Calculate average time per stage across recent runs"""
+        stage_times: Dict[str, List[int]] = {}
+        for metrics in self._recent_metrics:
+            for stage in metrics.stages:
+                if stage.stage_name not in stage_times:
+                    stage_times[stage.stage_name] = []
+                stage_times[stage.stage_name].append(stage.duration_ms)
+
+        return {
+            name: sum(times) / len(times) if times else 0
+            for name, times in stage_times.items()
+        }
+
+    def get_success_rate(self) -> float:
+        """Calculate overall success rate"""
+        if not self._recent_metrics:
+            return 1.0
+        successful = sum(1 for m in self._recent_metrics if m.success)
+        return successful / len(self._recent_metrics)
+
+
+# Global metrics collector instance
+metrics_collector = MetricsCollector()
 
 
 class PipelineOrchestrator:
@@ -64,7 +185,7 @@ class PipelineOrchestrator:
         priority: str = "normal",
     ) -> AiProcessingResult:
         """
-        Run the full processing pipeline
+        Run the full processing pipeline with performance monitoring
 
         Args:
             notice_id: UUID of the notice
@@ -75,7 +196,12 @@ class PipelineOrchestrator:
         Returns:
             AiProcessingResult with success status and report
         """
-        start_time = time.time()
+        # Initialize metrics
+        pipeline_metrics = PipelineMetrics(
+            notice_id=str(notice_id),
+            organization_id=str(organization_id) if organization_id else None,
+            start_time=time.time()
+        )
 
         logger.info(
             "Starting pipeline processing",
@@ -94,48 +220,87 @@ class PipelineOrchestrator:
 
         try:
             # Stage 1: Preprocessing
+            stage = pipeline_metrics.add_stage("preprocessing")
             context = await self._stage_preprocessing(context)
+            stage.complete(success=not context.failed, error=context.error if context.failed else None)
             if context.failed:
+                pipeline_metrics.complete(False, "preprocessing", context.error)
+                metrics_collector.record(pipeline_metrics)
                 return self._create_error_result(context)
 
             # Stage 2: OCR
+            stage = pipeline_metrics.add_stage("ocr")
             context = await self._stage_ocr(context)
+            stage.complete(
+                success=not context.failed,
+                error=context.error if context.failed else None,
+                text_length=len(context.raw_text) if context.raw_text else 0
+            )
             if context.failed:
+                pipeline_metrics.complete(False, "ocr", context.error)
+                metrics_collector.record(pipeline_metrics)
                 return self._create_error_result(context)
 
             # Stage 3: Entity Extraction
+            stage = pipeline_metrics.add_stage("entity_extraction")
             context = await self._stage_entity_extraction(context)
+            stage.complete(success=not context.failed, error=context.error if context.failed else None)
             if context.failed:
+                pipeline_metrics.complete(False, "entity_extraction", context.error)
+                metrics_collector.record(pipeline_metrics)
                 return self._create_error_result(context)
 
             # Stage 4: Classification
+            stage = pipeline_metrics.add_stage("classification")
             context = await self._stage_classification(context)
+            stage.complete(
+                success=context.classification_output.success if context.classification_output else False,
+                notice_type=context.classification_output.notice_type if context.classification_output else None
+            )
             # Non-fatal - continue even if classification fails
 
             # Stage 5: RAG Retrieval
+            stage = pipeline_metrics.add_stage("rag_retrieval")
             context = await self._stage_rag_retrieval(context)
+            stage.complete(
+                success=context.rag_context.success if context.rag_context else False,
+                contexts_retrieved=context.rag_context.total_retrieved if context.rag_context else 0
+            )
             # Non-fatal - continue even if RAG fails
 
             # Stage 6: LLM Analysis
+            stage = pipeline_metrics.add_stage("llm_analysis")
             context = await self._stage_llm_analysis(context)
+            stage.complete(success=not context.failed, error=context.error if context.failed else None)
             if context.failed:
+                pipeline_metrics.complete(False, "llm_analysis", context.error)
+                metrics_collector.record(pipeline_metrics)
                 return self._create_error_result(context)
 
             # Stage 7: Verification
+            stage = pipeline_metrics.add_stage("verification")
             context = await self._stage_verification(context)
+            stage.complete(
+                success=context.verification_output.success if context.verification_output else False,
+                verified=context.verification_output.verification.is_verified if context.verification_output and context.verification_output.verification else False
+            )
             # Non-fatal - continue even if verification has issues
 
             # Stage 8: Report Generation
+            stage = pipeline_metrics.add_stage("report_generation")
             report = await self._stage_report_generation(context)
+            stage.complete(success=True, risk_score=report.risk_score)
 
-            # Calculate total time
-            total_time_ms = int((time.time() - start_time) * 1000)
+            # Complete metrics
+            pipeline_metrics.complete(success=True)
+            metrics_collector.record(pipeline_metrics)
 
             logger.info(
                 "Pipeline processing complete",
                 notice_id=str(notice_id),
-                total_time_ms=total_time_ms,
-                risk_score=report.risk_score
+                total_duration_ms=pipeline_metrics.total_duration_ms,
+                risk_score=report.risk_score,
+                stage_timings=pipeline_metrics.to_dict()["stage_breakdown"]
             )
 
             return AiProcessingResult(
@@ -144,16 +309,32 @@ class PipelineOrchestrator:
             )
 
         except Exception as e:
+            pipeline_metrics.complete(False, context.current_stage, str(e))
+            metrics_collector.record(pipeline_metrics)
+
             logger.error(
                 "Pipeline processing failed",
                 notice_id=str(notice_id),
                 error=str(e),
-                stage=context.current_stage
+                stage=context.current_stage,
+                metrics=pipeline_metrics.to_dict()
             )
             return AiProcessingResult(
                 success=False,
                 error=str(e),
             )
+
+    def get_metrics(self, limit: int = 10) -> List[Dict]:
+        """Get recent pipeline metrics"""
+        return metrics_collector.get_recent_metrics(limit)
+
+    def get_average_stage_times(self) -> Dict[str, float]:
+        """Get average time per stage"""
+        return metrics_collector.get_average_stage_times()
+
+    def get_success_rate(self) -> float:
+        """Get pipeline success rate"""
+        return metrics_collector.get_success_rate()
 
     async def _stage_preprocessing(self, context: PipelineContext) -> PipelineContext:
         """Stage 1: Preprocessing"""
