@@ -123,7 +123,11 @@ class NoticeAnalyzer:
         deadline: Optional[str] = None,
         key_issues: Optional[str] = None,
         context: Optional[str] = None,
-    ) -> str:
+        tone: Optional[str] = None,
+        language: Optional[str] = None,
+        points_to_address: Optional[list] = None,
+        additional_instructions: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Generate a draft response for a notice
 
@@ -133,13 +137,45 @@ class NoticeAnalyzer:
             deadline: Response deadline
             key_issues: Key issues to address
             context: Additional context
+            tone: Response tone (formal, conciliatory, defensive)
+            language: Response language (en, hi)
+            points_to_address: Specific points to address
+            additional_instructions: Additional instructions
 
         Returns:
-            Draft response text
+            Dict with draft content and metadata
         """
-        logger.info("Generating response draft")
+        logger.info(
+            "Generating response draft",
+            tone=tone,
+            language=language,
+            has_points=bool(points_to_address),
+        )
 
         try:
+            # Get tone instruction
+            tone_instruction = {
+                "conciliatory": PromptTemplates.TONE_CONCILIATORY,
+                "defensive": PromptTemplates.TONE_DEFENSIVE,
+            }.get(tone or "formal", PromptTemplates.TONE_FORMAL)
+
+            # Get language instruction
+            language_instruction = (
+                PromptTemplates.LANGUAGE_HINDI
+                if language == "hi"
+                else PromptTemplates.LANGUAGE_ENGLISH
+            )
+
+            # Build additional points section
+            additional_points = ""
+            if points_to_address:
+                additional_points += "\nSPECIFIC POINTS TO ADDRESS:\n"
+                for point in points_to_address[:10]:  # Limit to 10
+                    additional_points += f"- {point}\n"
+
+            if additional_instructions:
+                additional_points += f"\nADDITIONAL INSTRUCTIONS:\n{additional_instructions[:1000]}\n"
+
             messages = [
                 {"role": "system", "content": PromptTemplates.RESPONSE_GENERATION_SYSTEM},
                 {"role": "user", "content": PromptTemplates.RESPONSE_GENERATION_USER.format(
@@ -148,16 +184,30 @@ class NoticeAnalyzer:
                     deadline=deadline or "Not specified",
                     key_issues=key_issues or "See notice summary",
                     context=context or "None provided",
+                    tone=tone_instruction,
+                    language_instruction=language_instruction,
+                    additional_points=additional_points,
                 )}
             ]
 
             response = await self.client.complete(
                 messages=messages,
                 temperature=0.3,
-                max_tokens=2000,
+                max_tokens=4000,
             )
 
-            return response["content"]
+            logger.info(
+                "Response draft generated",
+                input_tokens=response.get("input_tokens", 0),
+                output_tokens=response.get("output_tokens", 0),
+            )
+
+            return {
+                "content": response["content"],
+                "model": response.get("model", "unknown"),
+                "input_tokens": response.get("input_tokens", 0),
+                "output_tokens": response.get("output_tokens", 0),
+            }
 
         except Exception as e:
             logger.error("Response generation failed", error=str(e))

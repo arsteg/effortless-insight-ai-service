@@ -144,7 +144,12 @@ Structure the response with:
 - Point-by-point response
 - Supporting documents list
 - Prayer/request
-- Proper closing"""
+- Proper closing
+
+IMPORTANT:
+- Do not fabricate facts or figures
+- Use placeholders like [INSERT AMOUNT] or [ATTACH DOCUMENT] for specific details
+- Include disclaimers for any assumptions made"""
 
     RESPONSE_GENERATION_USER = """Generate a draft response for this GST notice:
 
@@ -160,7 +165,21 @@ KEY ISSUES:
 CONTEXT PROVIDED:
 {context}
 
+TONE: {tone}
+LANGUAGE: {language_instruction}
+
+{additional_points}
+
 Generate a professional draft response addressing all points."""
+
+    # Tone-specific instructions
+    TONE_FORMAL = "Use a formal, professional tone suitable for official correspondence with tax authorities."
+    TONE_CONCILIATORY = "Use a respectful, cooperative tone. Acknowledge any valid points raised by the department while providing clarifications."
+    TONE_DEFENSIVE = "Use a firm but professional tone. Clearly state your legal positions and cite relevant provisions."
+
+    # Language instructions
+    LANGUAGE_ENGLISH = "Write the response in English using formal legal/administrative language."
+    LANGUAGE_HINDI = "Write the response in Hindi using formal administrative language (शुद्ध हिंदी में औपचारिक प्रशासनिक भाषा का प्रयोग करें)."
 
     # Risk explanation prompt
     RISK_EXPLANATION_SYSTEM = """You are a tax consultant explaining risk assessment to business owners.

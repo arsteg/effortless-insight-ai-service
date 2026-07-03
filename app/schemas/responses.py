@@ -183,10 +183,20 @@ class SimilarNoticesResponse(CamelCaseModel):
     similar_notices: List[SimilarNotice] = Field(default_factory=list)
 
 
+class GenerateResponseMetadata(CamelCaseModel):
+    """Metadata about response generation"""
+    model: str = Field("unknown", description="Model used for generation")
+    input_tokens: int = Field(0, description="Number of input tokens")
+    output_tokens: int = Field(0, description="Number of output tokens")
+    processing_time_ms: int = Field(0, description="Processing time in milliseconds")
+
+
 class GenerateResponseResponse(CamelCaseModel):
     """Response for generate response endpoint"""
     success: bool = Field(True)
-    draft: str = Field(..., description="Generated draft response")
+    error: Optional[str] = Field(None, description="Error message if failed")
+    draft: Optional[str] = Field(None, description="Generated draft response")
+    metadata: Optional[GenerateResponseMetadata] = Field(None, description="Generation metadata")
 
 
 class SearchResult(CamelCaseModel):

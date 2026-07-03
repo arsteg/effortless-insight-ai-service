@@ -23,8 +23,11 @@ class GenerateResponseRequest(BaseModel):
     """Request model for generating a draft response"""
     notice_id: UUID = Field(..., alias="noticeId", description="UUID of the notice")
     context: Optional[Dict[str, Any]] = Field(None, description="Additional context for response generation")
-    tone: Optional[str] = Field("formal", description="Tone of the response: formal, conciliatory, assertive")
+    tone: Optional[str] = Field("formal", description="Tone of the response: formal, conciliatory, defensive")
+    language: Optional[str] = Field("en", description="Language for the response: en (English) or hi (Hindi)")
     include_case_law: Optional[bool] = Field(True, alias="includeCaseLaw", description="Include relevant case law citations")
+    points_to_address: Optional[list[str]] = Field(None, alias="pointsToAddress", description="Specific points to address in the response")
+    additional_instructions: Optional[str] = Field(None, alias="additionalInstructions", description="Additional instructions for response generation")
 
     class Config:
         populate_by_name = True

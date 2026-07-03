@@ -1,9 +1,15 @@
 """
-Notice processing endpoints - matching .NET IAiServiceClient interface
+Notice processing endpoints - matching .NET IAiServiceClient interface.
+
+This module provides:
+- /notice - Process a GST notice through the AI pipeline
+- /generate-response - Generate AI-powered draft response
+- /similar - Find similar notices using vector similarity
 """
 
 import time
 from uuid import UUID
+
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
@@ -129,16 +135,24 @@ async def generate_response(
     Request body:
     - noticeId: UUID of the notice
     - context: Additional context for response generation
-    - tone: Response tone (formal, conciliatory, assertive)
+    - tone: Response tone (formal, conciliatory, defensive)
+    - language: Response language (en, hi)
     - includeCaseLaw: Whether to include case law citations
+    - pointsToAddress: Specific points to address
+    - additionalInstructions: Additional instructions
 
     Returns:
     - success: Whether generation succeeded
     - draft: Generated draft response text
+    - metadata: Generation metadata (model, tokens, time)
     """
+    start_time = time.time()
+
     logger.info(
         "Generating response draft",
-        notice_id=str(request.notice_id)
+        notice_id=str(request.notice_id),
+        tone=request.tone,
+        language=request.language,
     )
 
     try:
@@ -172,17 +186,31 @@ async def generate_response(
 
         context_str = "\n".join(context_parts) if context_parts else ""
 
-        draft = await analyzer.generate_response_draft(
+        result = await analyzer.generate_response_draft(
             notice_summary=notice_summary,
             notice_type=notice_type,
             deadline=deadline,
             key_issues=key_issues,
             context=context_str,
+            tone=request.tone,
+            language=request.language,
+            points_to_address=request.points_to_address,
+            additional_instructions=request.additional_instructions,
         )
+
+        processing_time_ms = int((time.time() - start_time) * 1000)
+
+        from app.schemas.responses import GenerateResponseMetadata
 
         return GenerateResponseResponse(
             success=True,
-            draft=draft
+            draft=result["content"],
+            metadata=GenerateResponseMetadata(
+                model=result.get("model", "unknown"),
+                input_tokens=result.get("input_tokens", 0),
+                output_tokens=result.get("output_tokens", 0),
+                processing_time_ms=processing_time_ms,
+            )
         )
 
     except Exception as e:
@@ -191,7 +219,12 @@ async def generate_response(
             notice_id=str(request.notice_id),
             error=str(e)
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        return GenerateResponseResponse(
+            success=False,
+            error=str(e),
+            draft=None,
+            metadata=None
+        )
 
 
 async def _fetch_notice_details(db: AsyncSession, notice_id: UUID) -> dict | None:
@@ -203,21 +236,22 @@ async def _fetch_notice_details(db: AsyncSession, notice_id: UUID) -> dict | Non
     try:
         from sqlalchemy import text
 
+        # Query uses quoted identifiers for PostgreSQL table names (PascalCase from EF Core)
         query = text("""
             SELECT
-                n.notice_number,
-                n.notice_type,
-                n.notice_category,
-                n.status,
-                n.response_deadline,
-                n.total_demand,
-                n.gstin,
-                ar.summary_en as ai_report_summary,
-                ar.plain_english,
-                ar.risk_level
-            FROM notices n
-            LEFT JOIN ai_reports ar ON ar.notice_id = n.id
-            WHERE n.id = :notice_id
+                n."NoticeNumber" as notice_number,
+                n."NoticeType" as notice_type,
+                n."NoticeCategory" as notice_category,
+                n."Status" as status,
+                n."ResponseDeadline" as response_deadline,
+                n."TotalDemand" as total_demand,
+                n."Gstin" as gstin,
+                ar."SummaryEn" as ai_report_summary,
+                ar."PlainEnglish" as plain_english,
+                ar."RiskLevel" as risk_level
+            FROM "Notices" n
+            LEFT JOIN "NoticeAiReports" ar ON ar."NoticeId" = n."Id"
+            WHERE n."Id" = :notice_id
             LIMIT 1
         """)
 
