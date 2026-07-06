@@ -4,6 +4,7 @@ Retry decorators with exponential backoff
 
 import asyncio
 import functools
+import time
 from typing import Callable, Type, Tuple, Optional
 from dataclasses import dataclass
 import structlog
@@ -139,7 +140,6 @@ def retry_sync(
                     if attempt == config.max_attempts:
                         raise
 
-                    import time
                     time.sleep(delay)
                     delay *= config.exponential_base
 

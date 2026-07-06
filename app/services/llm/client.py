@@ -2,6 +2,7 @@
 OpenAI client wrapper with retry logic and response caching
 """
 
+import asyncio
 import time
 import hashlib
 import json
@@ -212,7 +213,6 @@ class LLMClient:
 
     async def _async_sleep(self, seconds: float):
         """Async sleep for retry backoff"""
-        import asyncio
         await asyncio.sleep(seconds)
 
     def estimate_cost(self) -> float:

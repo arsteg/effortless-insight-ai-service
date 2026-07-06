@@ -6,6 +6,7 @@ from typing import Optional, Callable
 from functools import wraps
 import structlog
 from fastapi import Request, HTTPException, Depends
+from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -54,7 +55,6 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
                 path=request.url.path,
                 client=request.client.host if request.client else "unknown"
             )
-            from fastapi.responses import JSONResponse
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Missing API key"}
@@ -66,7 +66,6 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
                 path=request.url.path,
                 client=request.client.host if request.client else "unknown"
             )
-            from fastapi.responses import JSONResponse
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Invalid API key"}

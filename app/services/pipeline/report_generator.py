@@ -3,7 +3,7 @@ Report generator stage for the pipeline
 """
 
 import time
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 from uuid import UUID
 import structlog
@@ -208,7 +208,6 @@ class ReportGenerator:
             return None
 
         try:
-            from datetime import datetime
             return datetime.strptime(date_str, "%Y-%m-%d").date()
         except (ValueError, TypeError):
             return None

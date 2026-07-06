@@ -2,6 +2,8 @@
 Health check endpoints
 """
 
+import time
+
 from fastapi import APIRouter
 import structlog
 
@@ -70,7 +72,6 @@ async def readiness():
 
 async def _check_database() -> HealthCheck:
     """Check database connectivity"""
-    import time
     start = time.time()
 
     try:
@@ -94,7 +95,6 @@ async def _check_database() -> HealthCheck:
 
 async def _check_redis() -> HealthCheck:
     """Check Redis connectivity"""
-    import time
     start = time.time()
 
     try:
@@ -119,7 +119,6 @@ async def _check_redis() -> HealthCheck:
 
 async def _check_openai() -> HealthCheck:
     """Check OpenAI API availability"""
-    import time
     start = time.time()
 
     try:

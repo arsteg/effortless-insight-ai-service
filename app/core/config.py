@@ -2,6 +2,7 @@
 Application configuration using Pydantic Settings
 """
 
+import os
 from typing import Optional, List
 from pydantic_settings import BaseSettings
 from functools import lru_cache
@@ -23,8 +24,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379"
 
     # OpenAI
-    openai_api_key: str = ""
-    openai_model: str = "gpt-4-turbo-preview"
+    openai_api_key: str = ""  # Required: Set via OPENAI_API_KEY environment variable
+    openai_model: str = "gpt-4o"
     openai_embedding_model: str = "text-embedding-3-large"
     llm_temperature: float = 0.2
     llm_max_tokens: int = 4096
@@ -33,6 +34,7 @@ class Settings(BaseSettings):
     google_cloud_project_id: str = ""
     google_cloud_location: str = "us"
     google_document_ai_processor_id: str = ""
+    google_application_credentials: str = ""  # Path to service account JSON file
 
     # Azure Form Recognizer (Fallback OCR)
     azure_form_recognizer_endpoint: str = ""
@@ -79,3 +81,8 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+# Set Google Cloud credentials environment variable for the SDK
+# The Google Cloud SDK reads GOOGLE_APPLICATION_CREDENTIALS from os.environ
+if settings.google_application_credentials:
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = settings.google_application_credentials
