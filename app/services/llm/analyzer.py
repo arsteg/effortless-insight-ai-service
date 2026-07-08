@@ -1,17 +1,28 @@
 """
 Notice analyzer using LLM
+
+Security: All user inputs are sanitized to prevent prompt injection attacks.
+See app.services.security.prompt_sanitizer for implementation details.
 """
 
 import json
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import structlog
 
 from app.services.llm.client import LLMClient
 from app.services.llm.prompts import PromptTemplates
 from app.services.llm.translator import HindiTranslator
 from app.schemas.internal import AnalysisOutput, RAGContext
+from app.services.security.prompt_sanitizer import (
+    PromptSanitizer,
+    sanitize_for_prompt,
+    sanitize_user_input,
+)
 
 logger = structlog.get_logger()
+
+# Initialize sanitizer for this module
+_sanitizer = PromptSanitizer(strict_mode=True)
 
 
 class NoticeAnalyzer:
@@ -50,16 +61,32 @@ class NoticeAnalyzer:
         logger.info("Analyzing notice", text_length=len(notice_text))
 
         try:
-            # Format RAG context
-            context_str = PromptTemplates.format_rag_context(rag_context) if rag_context else ""
+            # SECURITY: Sanitize user input to prevent prompt injection (CRIT-003)
+            sanitization_result = _sanitizer.sanitize(notice_text, content_type="notice_text")
+            if sanitization_result.injection_attempts_detected > 0:
+                logger.warning(
+                    "Potential prompt injection in notice text",
+                    patterns=sanitization_result.patterns_matched,
+                    confidence=sanitization_result.confidence_score
+                )
 
-            # Truncate notice if too long
-            text = notice_text[:15000] if len(notice_text) > 15000 else notice_text
+            # Use sanitized text with XML delimiters for clear boundaries
+            sanitized_text = _sanitizer.wrap_user_content(
+                sanitization_result.sanitized_text[:15000],
+                label="NOTICE_CONTENT"
+            )
+
+            # Format and sanitize RAG context
+            context_str = ""
+            if rag_context:
+                raw_context = PromptTemplates.format_rag_context(rag_context)
+                # RAG context is from our knowledge base but still sanitize for safety
+                context_str = sanitize_user_input(raw_context, content_type="context")
 
             messages = [
                 {"role": "system", "content": PromptTemplates.ANALYSIS_SYSTEM},
                 {"role": "user", "content": PromptTemplates.ANALYSIS_USER.format(
-                    notice_text=text,
+                    notice_text=sanitized_text,
                     rag_context=context_str if context_str else "No additional context available."
                 )}
             ]
@@ -166,24 +193,42 @@ class NoticeAnalyzer:
                 else PromptTemplates.LANGUAGE_ENGLISH
             )
 
-            # Build additional points section
+            # SECURITY: Sanitize all user-provided inputs (CRIT-003)
+            # These inputs come from API requests and could contain injection attempts
+            sanitized_summary = sanitize_user_input(notice_summary or "", content_type="summary")
+            sanitized_issues = sanitize_user_input(key_issues or "", content_type="context")
+            sanitized_context = sanitize_user_input(context or "", content_type="context")
+
+            # Build and sanitize additional points section
             additional_points = ""
             if points_to_address:
                 additional_points += "\nSPECIFIC POINTS TO ADDRESS:\n"
                 for point in points_to_address[:10]:  # Limit to 10
-                    additional_points += f"- {point}\n"
+                    # Sanitize each point individually
+                    sanitized_point = sanitize_user_input(str(point), content_type="points")
+                    additional_points += f"- {sanitized_point}\n"
 
             if additional_instructions:
-                additional_points += f"\nADDITIONAL INSTRUCTIONS:\n{additional_instructions[:1000]}\n"
+                # This is a high-risk field - sanitize strictly
+                sanitized_instructions = _sanitizer.sanitize(
+                    additional_instructions[:1000],
+                    content_type="instructions"
+                )
+                if sanitized_instructions.injection_attempts_detected > 0:
+                    logger.warning(
+                        "Potential injection in additional_instructions",
+                        patterns=sanitized_instructions.patterns_matched
+                    )
+                additional_points += f"\nADDITIONAL INSTRUCTIONS:\n{sanitized_instructions.sanitized_text}\n"
 
             messages = [
                 {"role": "system", "content": PromptTemplates.RESPONSE_GENERATION_SYSTEM},
                 {"role": "user", "content": PromptTemplates.RESPONSE_GENERATION_USER.format(
-                    notice_summary=notice_summary,
+                    notice_summary=sanitized_summary,
                     notice_type=notice_type or "Unknown",
                     deadline=deadline or "Not specified",
-                    key_issues=key_issues or "See notice summary",
-                    context=context or "None provided",
+                    key_issues=sanitized_issues if sanitized_issues else "See notice summary",
+                    context=sanitized_context if sanitized_context else "None provided",
                     tone=tone_instruction,
                     language_instruction=language_instruction,
                     additional_points=additional_points,
@@ -217,7 +262,7 @@ class NoticeAnalyzer:
         self,
         risk_score: int,
         risk_level: str,
-        risk_factors: list,
+        risk_factors: List[str],
     ) -> str:
         """
         Generate simple explanation of risk assessment
@@ -231,12 +276,18 @@ class NoticeAnalyzer:
             Plain language explanation
         """
         try:
+            # SECURITY: Sanitize risk factors which may come from LLM output (chain injection)
+            sanitized_factors = [
+                sanitize_user_input(str(f), content_type="points")
+                for f in (risk_factors or [])[:10]
+            ]
+
             messages = [
                 {"role": "system", "content": PromptTemplates.RISK_EXPLANATION_SYSTEM},
                 {"role": "user", "content": PromptTemplates.RISK_EXPLANATION_USER.format(
                     risk_score=risk_score,
                     risk_level=risk_level,
-                    risk_factors="\n".join(f"- {f}" for f in risk_factors),
+                    risk_factors="\n".join(f"- {f}" for f in sanitized_factors),
                 )}
             ]
 

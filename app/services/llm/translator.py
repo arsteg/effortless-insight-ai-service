@@ -1,14 +1,22 @@
 """
 Hindi translator using LLM
+
+Security: All user inputs are sanitized to prevent prompt injection attacks.
+See app.services.security.prompt_sanitizer for implementation details.
 """
 
-from typing import Optional
+import re
+from typing import Optional, List
 import structlog
 
 from app.services.llm.client import LLMClient
 from app.services.llm.prompts import PromptTemplates
+from app.services.security.prompt_sanitizer import PromptSanitizer, sanitize_user_input
 
 logger = structlog.get_logger()
+
+# Initialize sanitizer for this module
+_sanitizer = PromptSanitizer(strict_mode=True)
 
 
 class HindiTranslator:
@@ -40,10 +48,24 @@ class HindiTranslator:
             if len(text) > max_length:
                 text = text[:max_length] + "..."
 
+            # SECURITY: Sanitize input to prevent prompt injection (CRIT-003)
+            sanitization_result = _sanitizer.sanitize(text, content_type="summary")
+            if sanitization_result.injection_attempts_detected > 0:
+                logger.warning(
+                    "Potential prompt injection in translation input",
+                    patterns=sanitization_result.patterns_matched
+                )
+
+            # Wrap with XML delimiters for clear boundaries
+            sanitized_text = _sanitizer.wrap_user_content(
+                sanitization_result.sanitized_text,
+                label="TEXT_TO_TRANSLATE"
+            )
+
             messages = [
                 {"role": "system", "content": PromptTemplates.TRANSLATION_SYSTEM},
                 {"role": "user", "content": PromptTemplates.TRANSLATION_USER.format(
-                    text=text
+                    text=sanitized_text
                 )}
             ]
 
@@ -67,7 +89,7 @@ class HindiTranslator:
             logger.error("Translation failed", error=str(e))
             return ""
 
-    async def translate_batch(self, texts: list, max_batch_size: int = 5) -> list:
+    async def translate_batch(self, texts: List[str], max_batch_size: int = 5) -> List[str]:
         """
         Translate multiple texts to Hindi
 
@@ -78,13 +100,26 @@ class HindiTranslator:
         Returns:
             List of Hindi translations
         """
-        translations = []
+        translations: List[str] = []
 
         for i in range(0, len(texts), max_batch_size):
             batch = texts[i:i + max_batch_size]
 
-            # Combine texts with markers
-            combined = "\n\n---\n\n".join(f"[{j+1}] {t}" for j, t in enumerate(batch))
+            # SECURITY: Sanitize each text in the batch (CRIT-003)
+            sanitized_batch = []
+            for t in batch:
+                sanitized = sanitize_user_input(str(t), content_type="summary")
+                sanitized_batch.append(sanitized)
+
+            # Combine texts with markers and wrap in XML delimiters
+            combined_parts = []
+            for j, t in enumerate(sanitized_batch):
+                combined_parts.append(f"[{j+1}] {t}")
+
+            combined = _sanitizer.wrap_user_content(
+                "\n\n---\n\n".join(combined_parts),
+                label="TEXTS_TO_TRANSLATE"
+            )
 
             try:
                 messages = [
@@ -106,7 +141,6 @@ class HindiTranslator:
                 parts = result.split("---")
                 for part in parts:
                     # Remove numbering and clean
-                    import re
                     clean = re.sub(r'^\s*\[\d+\]\s*', '', part.strip())
                     if clean:
                         translations.append(clean)

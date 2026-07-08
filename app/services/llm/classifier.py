@@ -1,5 +1,8 @@
 """
 Notice classifier using LLM
+
+Security: All user inputs are sanitized to prevent prompt injection attacks.
+See app.services.security.prompt_sanitizer for implementation details.
 """
 
 import json
@@ -9,8 +12,12 @@ import structlog
 from app.services.llm.client import LLMClient
 from app.services.llm.prompts import PromptTemplates
 from app.schemas.internal import ClassificationOutput
+from app.services.security.prompt_sanitizer import PromptSanitizer
 
 logger = structlog.get_logger()
+
+# Initialize sanitizer for this module
+_sanitizer = PromptSanitizer(strict_mode=True)
 
 
 class NoticeClassifier:
@@ -36,13 +43,29 @@ class NoticeClassifier:
         logger.info("Classifying notice", text_length=len(notice_text))
 
         try:
-            # Truncate text if too long
-            text = notice_text[:10000] if len(notice_text) > 10000 else notice_text
+            # SECURITY: Sanitize user input to prevent prompt injection (CRIT-003)
+            sanitization_result = _sanitizer.sanitize(
+                notice_text[:10000] if len(notice_text) > 10000 else notice_text,
+                content_type="notice_text"
+            )
+
+            if sanitization_result.injection_attempts_detected > 0:
+                logger.warning(
+                    "Potential prompt injection in classification input",
+                    patterns=sanitization_result.patterns_matched,
+                    confidence=sanitization_result.confidence_score
+                )
+
+            # Wrap with XML delimiters for clear content boundaries
+            sanitized_text = _sanitizer.wrap_user_content(
+                sanitization_result.sanitized_text,
+                label="NOTICE_TEXT"
+            )
 
             messages = [
                 {"role": "system", "content": PromptTemplates.CLASSIFICATION_SYSTEM},
                 {"role": "user", "content": PromptTemplates.CLASSIFICATION_USER.format(
-                    notice_text=text
+                    notice_text=sanitized_text
                 )}
             ]
 
