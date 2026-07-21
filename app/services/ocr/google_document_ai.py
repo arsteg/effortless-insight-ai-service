@@ -79,10 +79,14 @@ class GoogleDocumentAI(OCRProvider):
             )
 
             # Create the request
-            request = documentai.ProcessRequest(
-                name=processor_name,
-                raw_document=raw_document
-            )
+            process_options = self._build_process_options()
+            request_kwargs = {
+                "name": processor_name,
+                "raw_document": raw_document,
+            }
+            if process_options is not None:
+                request_kwargs["process_options"] = process_options
+            request = documentai.ProcessRequest(**request_kwargs)
 
             # Process the document
             logger.info(
@@ -92,7 +96,21 @@ class GoogleDocumentAI(OCRProvider):
                 content_size=len(content)
             )
 
-            result = await client.process_document(request=request)
+            try:
+                result = await client.process_document(request=request)
+            except GoogleAPIError as e:
+                if process_options is None:
+                    raise
+                # Some processor types reject OCR options; retry without them
+                logger.warning(
+                    "Document AI rejected process_options, retrying without",
+                    error=str(e)
+                )
+                request = documentai.ProcessRequest(
+                    name=processor_name,
+                    raw_document=raw_document,
+                )
+                result = await client.process_document(request=request)
             document = result.document
 
             # Extract text and confidence
@@ -119,10 +137,19 @@ class GoogleDocumentAI(OCRProvider):
                             block_confidences.append(block.layout.confidence)
                     if block_confidences:
                         page_confidences.append(sum(block_confidences) / len(block_confidences))
-                    else:
-                        page_confidences.append(0.95)  # Default high confidence
+                    # Pages without any confidence data are excluded from the
+                    # average rather than assumed to be high confidence
 
-            avg_confidence = sum(page_confidences) / len(page_confidences) if page_confidences else 0.0
+            if page_confidences:
+                avg_confidence = sum(page_confidences) / len(page_confidences)
+            else:
+                # Confidence unavailable: treat as uncertain (below the fallback
+                # threshold) instead of fabricating a high score
+                avg_confidence = 0.5
+                logger.warning(
+                    "Document AI returned no confidence data, treating as uncertain",
+                    page_count=page_count
+                )
 
             # Extract tables
             tables = self._extract_tables(document)
@@ -165,6 +192,27 @@ class GoogleDocumentAI(OCRProvider):
                 error=f"Unexpected error: {str(e)}",
                 processing_time_ms=int((time.time() - start_time) * 1000)
             )
+
+    def _build_process_options(self) -> Optional["documentai.ProcessOptions"]:
+        """
+        Build OCR options: language hints (Hindi/English notices) and image
+        quality scores. Returns None if the installed SDK lacks OcrConfig.
+        """
+        try:
+            return documentai.ProcessOptions(
+                ocr_config=documentai.OcrConfig(
+                    hints=documentai.OcrConfig.Hints(
+                        language_hints=list(settings.ocr_language_hints)
+                    ),
+                    enable_image_quality_scores=True,
+                )
+            )
+        except (AttributeError, ValueError, TypeError) as e:
+            logger.warning(
+                "Document AI OcrConfig unavailable, processing with defaults",
+                error=str(e)
+            )
+            return None
 
     def _extract_page_text(self, full_text: str, layout) -> str:
         """Extract text for a specific page from the full document text"""

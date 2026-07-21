@@ -9,6 +9,7 @@ import json
 from typing import Optional, Dict, Any, List
 import structlog
 
+from app.core.config import settings
 from app.services.llm.client import LLMClient
 from app.services.llm.prompts import PromptTemplates
 from app.services.llm.translator import HindiTranslator
@@ -71,8 +72,15 @@ class NoticeAnalyzer:
                 )
 
             # Use sanitized text with XML delimiters for clear boundaries
+            max_chars = settings.analysis_max_chars
+            if len(sanitization_result.sanitized_text) > max_chars:
+                logger.warning(
+                    "Notice text truncated for analysis",
+                    original_length=len(sanitization_result.sanitized_text),
+                    max_chars=max_chars
+                )
             sanitized_text = _sanitizer.wrap_user_content(
-                sanitization_result.sanitized_text[:15000],
+                sanitization_result.sanitized_text[:max_chars],
                 label="NOTICE_CONTENT"
             )
 
@@ -114,6 +122,8 @@ class NoticeAnalyzer:
                 output_tokens=response["output_tokens"],
             )
 
+            llm_metadata = result.get("metadata")
+
             return AnalysisOutput(
                 success=True,
                 risk_score=result.get("risk_score", 50),
@@ -121,6 +131,7 @@ class NoticeAnalyzer:
                 summary_en=result.get("summary_en", ""),
                 summary_hi=summary_hi,
                 plain_english=result.get("plain_english", ""),
+                metadata=llm_metadata if isinstance(llm_metadata, dict) else {},
                 action_items=result.get("action_items", []),
                 required_documents=result.get("required_documents", []),
                 legal_references=result.get("legal_references", []),

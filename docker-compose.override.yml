@@ -1,0 +1,11 @@
+# Local override: this machine runs a native Windows PostgreSQL that listens on
+# a RANGE of ports (5432, 5433, ...), plus a Redis-compatible server on 6379.
+# Publish the containers on high, unused host ports so they don't collide.
+# Keep .env DATABASE_URL/REDIS_URL pointed at these ports.
+services:
+  postgres:
+    ports:
+      - "55432:5432"
+  redis:
+    ports:
+      - "55440:6379"

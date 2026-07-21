@@ -75,7 +75,9 @@ Provide your analysis in JSON format with the following structure:
         "interest_amount": <number or null>,
         "period_from": "<YYYY-MM-DD or null>",
         "period_to": "<YYYY-MM-DD or null>",
-        "issuing_authority": "<authority name or null>"
+        "issuing_authority": "<authority name or null>",
+        "din": "<CBIC Document Identification Number (20-char alphanumeric, may appear with spaces/hyphens) or null>",
+        "officer_name": "<name of the signing/issuing officer or null>"
     },
     "action_items": [
         {
@@ -110,6 +112,49 @@ Provide your analysis in JSON format with the following structure:
 
 Provide your analysis in the specified JSON format. Be thorough but accurate.
 Only include information that is explicitly present in or can be reasonably inferred from the notice."""
+
+    # Vision extraction prompt (multimodal model reads page images directly)
+    VISION_EXTRACTION_SYSTEM = """You are an expert at reading scanned Indian GST (Goods and Services Tax) notices.
+You are shown page images of a notice. Scans may be skewed, noisy, bilingual
+(Hindi/English), and may contain handwritten entries, stamps and signatures.
+
+Your tasks:
+1. Transcribe the full text of every page faithfully, in natural reading order.
+   - Include handwritten text (e.g. handwritten DIN, diary numbers, dates).
+   - Transcribe Hindi text as-is in Devanagari script.
+   - NEVER invent text that is not visible. Write [illegible] for unreadable parts.
+2. Extract the key fields below. Use null for anything not present or not readable.
+   - The CBIC DIN is often HANDWRITTEN next to a printed "CBIC DIN-" label. It is a
+     20-character alphanumeric code (e.g. starts with year+month digits). Read it
+     character by character and return it without spaces or hyphens.
+   - For Indian financial years (e.g. "F.Y. 2020-21 to 2023-24"), period_from is
+     1 April of the first start year and period_to is 31 March of the last end year.
+
+Respond in JSON format:
+{
+    "transcript": "<full text of all pages in reading order>",
+    "metadata": {
+        "notice_type": "<form code like ADT-01, DRC-01, ASMT-10 or null>",
+        "notice_number": "<notice/file reference number or null>",
+        "din": "<20-char CBIC DIN without separators or null>",
+        "gstin": "<15-character GSTIN or null>",
+        "taxpayer_name": "<addressee name or null>",
+        "issue_date": "<YYYY-MM-DD or null>",
+        "response_deadline": "<YYYY-MM-DD date by which the taxpayer must respond/appear, or null>",
+        "period_from": "<YYYY-MM-DD or null>",
+        "period_to": "<YYYY-MM-DD or null>",
+        "tax_amount": <number or null>,
+        "penalty_amount": <number or null>,
+        "interest_amount": <number or null>,
+        "issuing_authority": "<issuing office/designation or null>",
+        "officer_name": "<name of the signing officer or null>",
+        "contact_details": "<phone numbers/emails given for queries or null>"
+    },
+    "handwritten_fields": ["<metadata field names whose values were read from handwriting>"]
+}"""
+
+    VISION_EXTRACTION_USER = """Transcribe and extract fields from this GST notice ({page_count} page image(s) attached).
+Respond in the specified JSON format."""
 
     # Hindi translation prompt
     TRANSLATION_SYSTEM = """You are a professional translator specializing in legal and tax documents.

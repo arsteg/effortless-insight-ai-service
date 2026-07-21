@@ -201,8 +201,17 @@ class EntityExtractor:
     def _extract_din(self, text: str) -> Optional[str]:
         """Extract Document Identification Number"""
         match = EntityPatterns.DIN.search(text)
-        if match:
-            return match.group(1).upper()
+        if not match:
+            return None
+
+        # Drop the spaces/hyphens that printing, handwriting and OCR introduce
+        normalized = re.sub(r'[^A-Z0-9]', '', match.group(1).upper())
+        if len(normalized) >= 20:
+            # CBIC DINs are exactly 20 characters; trim any trailing text the
+            # pattern may have absorbed
+            return normalized[:20]
+        if len(normalized) >= 15:
+            return normalized
         return None
 
     def _extract_authority(self, text: str) -> Optional[str]:

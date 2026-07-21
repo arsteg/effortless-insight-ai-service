@@ -101,8 +101,10 @@ class NoticeMetadata(CamelCaseModel):
     period_from: Optional[date] = Field(None, description="Start of tax period")
     period_to: Optional[date] = Field(None, description="End of tax period")
     issuing_authority: Optional[str] = Field(None, description="Issuing authority name")
+    din: Optional[str] = Field(None, description="CBIC Document Identification Number")
+    officer_name: Optional[str] = Field(None, description="Name of the signing/issuing officer")
 
-    @field_validator('notice_type', 'notice_category', 'notice_number', 'gstin', 'issuing_authority', mode='before')
+    @field_validator('notice_type', 'notice_category', 'notice_number', 'gstin', 'issuing_authority', 'din', 'officer_name', mode='before')
     @classmethod
     def parse_null_string(cls, v):
         """Handle LLM returning 'null' as string instead of JSON null"""

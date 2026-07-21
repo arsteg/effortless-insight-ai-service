@@ -49,7 +49,12 @@ class ReportGenerator:
             verification = context.verification_output
 
             # Build metadata
-            metadata = self._build_metadata(analysis, entities)
+            metadata = self._build_metadata(
+                analysis,
+                entities,
+                vision=context.vision_output,
+                classification=context.classification_output,
+            )
 
             # Build action items
             action_items = self._build_action_items(analysis)
@@ -108,29 +113,67 @@ class ReportGenerator:
             )
             raise
 
-    def _build_metadata(self, analysis, entities) -> NoticeMetadata:
-        """Build notice metadata from analysis and entities"""
-        # Start with analysis metadata
-        llm_metadata = analysis.metadata if analysis and hasattr(analysis, 'metadata') else {}
-        if isinstance(llm_metadata, dict):
-            pass
-        else:
-            llm_metadata = {}
+    def _build_metadata(self, analysis, entities, vision=None, classification=None) -> NoticeMetadata:
+        """
+        Build notice metadata by merging all extraction sources per field.
 
-        # Override with entity extraction where available (more reliable)
+        Precedence: validated regex entities first (checksum/format checked),
+        then vision extraction (reads the actual page images, including
+        handwriting), then LLM text analysis, then pattern classification.
+        """
+        llm_md = analysis.metadata if analysis and isinstance(getattr(analysis, "metadata", None), dict) else {}
+        vision_md = vision.metadata if vision and vision.success and isinstance(vision.metadata, dict) else {}
+
+        def pick(*values):
+            for v in values:
+                if v not in (None, "", "null"):
+                    return v
+            return None
+
+        def ent(field):
+            return getattr(entities, field, None) if entities else None
+
+        classified_type = classification.notice_type if classification and classification.success else None
+        classified_category = classification.notice_category if classification and classification.success else None
+
         return NoticeMetadata(
-            notice_type=llm_metadata.get("notice_type"),
-            notice_category=llm_metadata.get("notice_category"),
-            notice_number=entities.notice_number if entities else llm_metadata.get("notice_number"),
-            gstin=entities.primary_gstin if entities else llm_metadata.get("gstin"),
-            issue_date=entities.issue_date if entities else self._parse_date(llm_metadata.get("issue_date")),
-            response_deadline=entities.response_deadline if entities else self._parse_date(llm_metadata.get("response_deadline")),
-            tax_amount=entities.tax_amount if entities else llm_metadata.get("tax_amount"),
-            penalty_amount=entities.penalty_amount if entities else llm_metadata.get("penalty_amount"),
-            interest_amount=entities.interest_amount if entities else llm_metadata.get("interest_amount"),
-            period_from=entities.period_from if entities else self._parse_date(llm_metadata.get("period_from")),
-            period_to=entities.period_to if entities else self._parse_date(llm_metadata.get("period_to")),
-            issuing_authority=entities.issuing_authority if entities else llm_metadata.get("issuing_authority"),
+            notice_type=pick(classified_type, vision_md.get("notice_type"), llm_md.get("notice_type")),
+            notice_category=pick(classified_category, llm_md.get("notice_category")),
+            notice_number=pick(ent("notice_number"), vision_md.get("notice_number"), llm_md.get("notice_number")),
+            gstin=pick(ent("primary_gstin"), vision_md.get("gstin"), llm_md.get("gstin")),
+            # Dates prefer vision/LLM: the regex assigns date *types* from nearby
+            # keywords, which scanned layouts frequently break
+            issue_date=pick(
+                self._parse_date(vision_md.get("issue_date")),
+                self._parse_date(llm_md.get("issue_date")),
+                ent("issue_date"),
+            ),
+            response_deadline=pick(
+                self._parse_date(vision_md.get("response_deadline")),
+                self._parse_date(llm_md.get("response_deadline")),
+                ent("response_deadline"),
+            ),
+            tax_amount=pick(ent("tax_amount"), vision_md.get("tax_amount"), llm_md.get("tax_amount")),
+            penalty_amount=pick(ent("penalty_amount"), vision_md.get("penalty_amount"), llm_md.get("penalty_amount")),
+            interest_amount=pick(ent("interest_amount"), vision_md.get("interest_amount"), llm_md.get("interest_amount")),
+            period_from=pick(
+                self._parse_date(vision_md.get("period_from")),
+                self._parse_date(llm_md.get("period_from")),
+                ent("period_from"),
+            ),
+            period_to=pick(
+                self._parse_date(vision_md.get("period_to")),
+                self._parse_date(llm_md.get("period_to")),
+                ent("period_to"),
+            ),
+            # Vision/LLM read the letterhead; the regex only matches generic titles
+            issuing_authority=pick(
+                vision_md.get("issuing_authority"),
+                llm_md.get("issuing_authority"),
+                ent("issuing_authority"),
+            ),
+            din=pick(ent("din"), vision_md.get("din"), llm_md.get("din")),
+            officer_name=pick(vision_md.get("officer_name"), llm_md.get("officer_name")),
         )
 
     def _build_action_items(self, analysis) -> list:

@@ -26,6 +26,21 @@ class OCROutput(BaseModel):
     page_texts: List[str] = Field(default_factory=list)
 
 
+class VisionExtractionOutput(BaseModel):
+    """Output from vision-LLM extraction stage"""
+    success: bool = Field(...)
+    transcript: str = Field("")
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    handwritten_fields: List[str] = Field(default_factory=list)
+    page_count: int = Field(0)
+    pages_processed: int = Field(0)
+    error: Optional[str] = Field(None)
+
+    # Token usage
+    input_tokens: int = Field(0)
+    output_tokens: int = Field(0)
+
+
 class EntityExtractionOutput(BaseModel):
     """Output from entity extraction stage"""
     success: bool = Field(...)
@@ -69,6 +84,7 @@ class AnalysisOutput(BaseModel):
     summary_en: str = Field("")
     summary_hi: str = Field("")
     plain_english: str = Field("")
+    metadata: Dict[str, Any] = Field(default_factory=dict)
     action_items: List[Dict[str, Any]] = Field(default_factory=list)
     required_documents: List[Dict[str, Any]] = Field(default_factory=list)
     legal_references: List[Dict[str, Any]] = Field(default_factory=list)
@@ -102,6 +118,7 @@ class PipelineContext(BaseModel):
 
     # Stage outputs
     ocr_output: Optional[OCROutput] = Field(None)
+    vision_output: Optional[VisionExtractionOutput] = Field(None)
     entity_output: Optional[EntityExtractionOutput] = Field(None)
     classification_output: Optional[ClassificationOutput] = Field(None)
     rag_context: Optional[RAGContext] = Field(None)

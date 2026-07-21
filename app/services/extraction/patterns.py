@@ -104,8 +104,10 @@ class EntityPatterns:
         re.IGNORECASE
     )
 
+    # CBIC DIN: 20-char alphanumeric code, printed or handwritten after a
+    # "DIN"/"CBIC DIN" label, often broken up by spaces or hyphens
     DIN: Pattern = re.compile(
-        r'\b(DIN\d{16,20})\b',
+        r'\b(?:CBIC[\s\-]*)?DIN[\s\-:.#]*((?:[A-Z0-9][\s\-]{0,2}){15,25})',
         re.IGNORECASE
     )
 
@@ -130,8 +132,9 @@ class EntityPatterns:
         re.IGNORECASE
     )
 
+    # Allow multi-char separators: notices print e.g. "FORM GST ADT - 01"
     NOTICE_TYPE_GST: Pattern = re.compile(
-        r'(GST[\-\s]?(?:RFD|PMT|REG|INS|MIS|APL|ADT|RCM|EWB|CPD)[\-\s]?\d{2})',
+        r'(GST[\-\s]{0,3}(?:RFD|PMT|REG|INS|MIS|APL|ADT|RCM|EWB|CPD)[\-\s]{0,3}\d{2})',
         re.IGNORECASE
     )
 

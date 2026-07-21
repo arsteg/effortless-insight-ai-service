@@ -42,6 +42,20 @@ class Settings(BaseSettings):
 
     # OCR Settings
     ocr_confidence_threshold: float = 0.70
+    ocr_language_hints: List[str] = ["en", "hi"]
+
+    # Vision-LLM extraction (multimodal model reads page images directly,
+    # recovering handwriting, Hindi text and reading order that OCR loses)
+    vision_extraction_enabled: bool = True
+    vision_model: str = ""  # blank = use openai_model
+    vision_max_pages: int = 10
+    vision_dpi: int = 200
+    # Windows dev: pdf2image needs poppler; point this at poppler's bin folder
+    # if it is not on PATH (Docker installs poppler-utils system-wide)
+    poppler_path: str = ""
+
+    # LLM analysis input limit (characters of notice text sent to the analyzer)
+    analysis_max_chars: int = 60000
 
     # AWS
     aws_region: str = "ap-south-1"
@@ -72,6 +86,8 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        # Tolerate legacy/unknown keys in .env instead of failing startup
+        extra = "ignore"
 
 
 @lru_cache()

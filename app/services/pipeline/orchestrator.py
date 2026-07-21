@@ -9,9 +9,11 @@ from datetime import datetime
 from dataclasses import dataclass, field
 import structlog
 
+from app.core.config import settings
 from app.schemas.internal import (
     PipelineContext, OCROutput, EntityExtractionOutput,
-    ClassificationOutput, RAGContext, AnalysisOutput, VerificationOutput
+    ClassificationOutput, RAGContext, AnalysisOutput, VerificationOutput,
+    VisionExtractionOutput
 )
 from app.schemas.report import AIReport
 from app.schemas.responses import AiProcessingResult, AiReportData
@@ -22,6 +24,7 @@ from app.services.ocr.ocr_service import OCRService
 from app.services.extraction.entity_extractor import EntityExtractor
 from app.services.llm.classifier import NoticeClassifier
 from app.services.llm.analyzer import NoticeAnalyzer
+from app.services.llm.vision_extractor import VisionExtractor
 from app.services.rag.retriever import RAGRetriever
 from app.services.verification.verifier import Verifier
 from app.services.scoring.risk_scorer import RiskScorer
@@ -156,6 +159,8 @@ class PipelineOrchestrator:
     Stages:
     1. Preprocessor (~5s) - Download, detect format, assess quality
     2. OCRProcessor (~15s) - Google Document AI / Azure fallback
+    2b. VisionExtractor (~20s) - Multimodal LLM reads page images
+        (handwriting, Hindi text, correct reading order)
     3. EntityExtractor (~5s) - GSTIN, dates, amounts, sections
     4. NoticeClassifier (~3s) - LLM classification
     5. RAGRetriever (~5s) - Vector search, context retrieval
@@ -169,6 +174,7 @@ class PipelineOrchestrator:
     def __init__(self):
         self.preprocessor = Preprocessor()
         self.ocr_service = OCRService()
+        self.vision_extractor = VisionExtractor()
         self.entity_extractor = EntityExtractor()
         self.classifier = NoticeClassifier()
         self.rag_retriever = RAGRetriever()
@@ -240,6 +246,16 @@ class PipelineOrchestrator:
                 pipeline_metrics.complete(False, "ocr", context.error)
                 metrics_collector.record(pipeline_metrics)
                 return self._create_error_result(context)
+
+            # Stage 2b: Vision-LLM extraction (non-fatal)
+            if settings.vision_extraction_enabled:
+                stage = pipeline_metrics.add_stage("vision_extraction")
+                context = await self._stage_vision_extraction(context)
+                stage.complete(
+                    success=context.vision_output.success if context.vision_output else False,
+                    transcript_length=len(context.vision_output.transcript) if context.vision_output else 0
+                )
+                # Non-fatal - continue with OCR text if vision fails
 
             # Stage 3: Entity Extraction
             stage = pipeline_metrics.add_stage("entity_extraction")
@@ -389,6 +405,57 @@ class PipelineOrchestrator:
 
         except Exception as e:
             context.mark_failed("ocr", str(e))
+            return context
+
+    async def _stage_vision_extraction(self, context: PipelineContext) -> PipelineContext:
+        """
+        Stage 2b: Vision-LLM extraction
+
+        A multimodal model reads the page images directly. On scanned notices
+        this recovers handwriting, Hindi text and the reading order that OCR
+        loses, and yields structured metadata merged into the final report.
+        """
+        logger.info("Stage 2b: Vision extraction", notice_id=str(context.notice_id))
+        start_time = time.time()
+        context.current_stage = "vision_extraction"
+
+        try:
+            content = getattr(context, '_document_content', None)
+            if content is None:
+                logger.warning(
+                    "Vision extraction skipped: document bytes not available",
+                    notice_id=str(context.notice_id)
+                )
+                return context
+
+            mime_type = getattr(context, '_mime_type', 'application/pdf')
+            result = await self.vision_extractor.extract(content, mime_type)
+            context.vision_output = result
+
+            # Prefer the vision transcript as the working text unless it looks
+            # truncated relative to what OCR recovered
+            if result.success and result.transcript:
+                ocr_length = len(context.raw_text or "")
+                if len(result.transcript) >= 0.5 * ocr_length:
+                    context.raw_text = result.transcript
+
+            duration_ms = int((time.time() - start_time) * 1000)
+            context.record_stage_time("vision_extraction", duration_ms)
+
+            logger.info(
+                "Vision extraction complete",
+                notice_id=str(context.notice_id),
+                success=result.success,
+                transcript_length=len(result.transcript),
+                pages_processed=result.pages_processed,
+                duration_ms=duration_ms
+            )
+
+            return context
+
+        except Exception as e:
+            logger.warning("Vision extraction failed", error=str(e))
+            context.vision_output = VisionExtractionOutput(success=False, error=str(e))
             return context
 
     async def _stage_entity_extraction(self, context: PipelineContext) -> PipelineContext:

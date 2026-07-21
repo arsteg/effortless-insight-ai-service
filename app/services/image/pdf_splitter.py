@@ -6,6 +6,8 @@ import io
 from typing import List, Tuple, Optional
 import structlog
 
+from app.core.config import settings
+
 logger = structlog.get_logger()
 
 
@@ -64,11 +66,11 @@ class PDFSplitter:
         try:
             from pdf2image import convert_from_bytes
 
-            images = convert_from_bytes(
-                pdf_bytes,
-                dpi=self.dpi,
-                fmt='png'
-            )
+            convert_kwargs = {"dpi": self.dpi, "fmt": "png"}
+            if settings.poppler_path:
+                convert_kwargs["poppler_path"] = settings.poppler_path
+
+            images = convert_from_bytes(pdf_bytes, **convert_kwargs)
 
             image_bytes_list = []
             for img in images:
