@@ -54,7 +54,7 @@ class TestSettings:
     def test_openai_settings(self):
         """Test OpenAI settings"""
         settings = Settings()
-        assert settings.openai_model == "gpt-4-turbo-preview"
+        assert settings.openai_model == "gpt-4o"
         assert settings.openai_embedding_model == "text-embedding-3-large"
 
     def test_rag_settings(self):
