@@ -1,8 +1,12 @@
 """
 Comprehensive GST Notice Classification Patterns
 
-This module contains pattern definitions for 50+ GST form types
-organized by category for efficient classification.
+This module contains pattern definitions for 150+ GST form types
+(159 patterns at last count) organized into 11 categories for efficient
+classification. NOTE: this file substantiates the marketing claim
+"150+ notice types across 11 GST categories" on the landing page
+(hero, four-promises, how-it-works, product-tour) — if patterns or
+categories are removed, update that copy too.
 """
 
 from typing import Dict, List, Tuple
