@@ -3,7 +3,7 @@ Application configuration using Pydantic Settings
 """
 
 import os
-from typing import Optional, List
+from typing import Optional, List, Dict
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -79,9 +79,37 @@ class Settings(BaseSettings):
     # Pipeline Settings
     pipeline_timeout_seconds: int = 180
 
-    # Rate Limiting
+    # Rate Limiting (short-term burst protection on cost-incurring endpoints)
+    rate_limit_enabled: bool = True
     rate_limit_requests: int = 100
     rate_limit_period: int = 60  # seconds
+    # If the Redis counter store is unreachable, allow the request through
+    # (True) rather than failing it. Paired with the absolute monthly ceiling
+    # below so fail-open can never mean fail-unbounded.
+    rate_limit_fail_open: bool = True
+
+    # Per-plan monthly usage caps — the number of cost-incurring AI *requests*
+    # (process + generate-response + similar) an organization may make per
+    # calendar month. The caller's plan arrives in the `X-Plan` header and the
+    # org in `X-Organization-Id`, both set by the .NET API. A value of 0 = "unlimited".
+    #
+    # IMPORTANT: the .NET API is the AUTHORITATIVE per-plan gate — it blocks by
+    # monthly *notice* count (PlanSeeder: free=10, starter=50, professional=200,
+    # enterprise=unlimited) before it ever calls this service. These caps are a
+    # defense-in-depth BACKSTOP, so they are set ~5x the notice quota to leave
+    # headroom for the several AI calls a single notice can trigger; they must
+    # not be tighter than the notice quota or they would false-block.
+    usage_caps_enabled: bool = True
+    plan_monthly_request_caps: Dict[str, int] = {
+        "free": 50,
+        "starter": 250,
+        "professional": 1000,
+        "enterprise": 0,   # 0 = unlimited
+        "default": 50,     # used when no/unknown plan is supplied (treat as free)
+    }
+    # Absolute per-organization monthly ceiling enforced regardless of plan —
+    # a wallet circuit-breaker / defense-in-depth backstop. 0 = disabled.
+    usage_global_org_monthly_cap: int = 5000
 
     class Config:
         env_file = ".env"

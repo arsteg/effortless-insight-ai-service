@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.core.log_config import setup_logging
 from app.api import router as api_router
 from app.api.middleware.auth import APIKeyMiddleware
+from app.api.middleware.rate_limit import RateLimitMiddleware
 from app.api.middleware.logging import RequestLoggingMiddleware
 from app.api.middleware.metrics import MetricsMiddleware
 from app.api.middleware.error_handler import ErrorHandlerMiddleware
@@ -63,6 +64,13 @@ app.add_middleware(MetricsMiddleware)
 
 # Request logging
 app.add_middleware(RequestLoggingMiddleware)
+
+# Rate limiting + per-plan monthly usage caps. Registered before the auth
+# middleware so that at runtime auth executes FIRST (Starlette runs the
+# last-registered middleware outermost) — an unauthenticated flood is rejected
+# for free before it can touch the LLM or the usage counters. Protects OpenAI
+# spend on the /process and /embeddings cost endpoints.
+app.add_middleware(RateLimitMiddleware)
 
 # API key authentication (after logging so we log auth failures)
 app.add_middleware(APIKeyMiddleware)
