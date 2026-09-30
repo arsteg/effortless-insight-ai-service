@@ -434,7 +434,8 @@ class PipelineOrchestrator:
 
             # Prefer the vision transcript as the working text unless it looks
             # truncated relative to what OCR recovered
-            if result.success and result.transcript:
+            if (result.success and result.transcript and context.ocr_output
+                    and result.pages_processed >= context.ocr_output.page_count):
                 ocr_length = len(context.raw_text or "")
                 if len(result.transcript) >= 0.5 * ocr_length:
                     context.raw_text = result.transcript

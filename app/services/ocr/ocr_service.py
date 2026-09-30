@@ -2,6 +2,9 @@
 OCR Service with fallback strategy
 """
 
+import asyncio
+from io import BytesIO
+from pypdf import PdfReader, PdfWriter
 import time
 import hashlib
 from typing import Optional, Tuple
@@ -33,144 +36,96 @@ class OCRService:
         self.confidence_threshold = OCR_CONFIDENCE_THRESHOLD
 
     async def extract_text(self, file_url: str) -> OCRResult:
-        """
-        Extract text from a document URL
+        content, mime_type = await self._download_document(file_url)
+        if content is None:
+            return OCRResult(success=False, error=f"Failed to download document: {mime_type}")
+        return await self.extract_from_bytes(content, mime_type)
 
-        Args:
-            file_url: URL of the document (presigned S3 URL)
-
-        Returns:
-            OCRResult with extracted text
-        """
-        start_time = time.time()
-
-        logger.info("Starting OCR extraction", file_url=file_url[:80] + "...")
-
-        try:
-            # Download the document
-            content, mime_type = await self._download_document(file_url)
-            if content is None:
-                return OCRResult(
-                    success=False,
-                    error=f"Failed to download document: {mime_type}",
-                    processing_time_ms=int((time.time() - start_time) * 1000)
-                )
-
-            logger.info(
-                "Document downloaded",
-                size=len(content),
-                mime_type=mime_type
-            )
-
-            # Try Google Document AI first
-            if await self.google_ai.is_available():
-                result = await self.google_ai.process_document(content, mime_type)
-
-                if result.success and result.confidence >= self.confidence_threshold:
-                    logger.info(
-                        "OCR completed with Google Document AI",
-                        confidence=result.confidence,
-                        page_count=result.page_count
-                    )
-                    return result
-
-                # Low confidence or failure - try Azure fallback
-                logger.warning(
-                    "Google Document AI result below threshold, trying Azure fallback",
-                    confidence=result.confidence,
-                    threshold=self.confidence_threshold,
-                    error=result.error
-                )
-
-            # Try Azure Form Recognizer as fallback
-            if await self.azure_fr.is_available():
-                azure_result = await self.azure_fr.process_document(content, mime_type)
-
-                if azure_result.success:
-                    # If we had a Google result, compare and use the better one
-                    if 'result' in locals() and result.success:
-                        if azure_result.confidence > result.confidence:
-                            logger.info(
-                                "Using Azure result (higher confidence)",
-                                azure_confidence=azure_result.confidence,
-                                google_confidence=result.confidence
-                            )
-                            return azure_result
-                        else:
-                            logger.info(
-                                "Using Google result (higher confidence despite being below threshold)",
-                                azure_confidence=azure_result.confidence,
-                                google_confidence=result.confidence
-                            )
-                            return result
-                    else:
-                        logger.info(
-                            "OCR completed with Azure Form Recognizer",
-                            confidence=azure_result.confidence,
-                            page_count=azure_result.page_count
-                        )
-                        return azure_result
-
-                logger.error("Azure Form Recognizer also failed", error=azure_result.error)
-
-            # Return whatever result we have (even if below threshold)
-            if 'result' in locals() and result.success:
-                logger.warning(
-                    "Returning low-confidence Google result (no fallback available)",
-                    confidence=result.confidence
-                )
-                return result
-
-            # Both providers failed or unavailable
-            return OCRResult(
-                success=False,
-                error="All OCR providers failed or unavailable",
-                processing_time_ms=int((time.time() - start_time) * 1000)
-            )
-
-        except Exception as e:
-            logger.error("OCR extraction failed", error=str(e))
-            return OCRResult(
-                success=False,
-                error=str(e),
-                processing_time_ms=int((time.time() - start_time) * 1000)
-            )
+    @staticmethod
+    def _pdf_batches(content: bytes):
+        reader = PdfReader(BytesIO(content))
+        if reader.is_encrypted and not reader.decrypt(""):
+            raise ValueError("PDF is password protected; upload an unlocked copy")
+        count = len(reader.pages)
+        if not count:
+            raise ValueError("PDF contains no pages")
+        # Keep each online OCR request within the standard 15-page limit.
+        batches = []
+        for start in range(0, count, 15):
+            writer = PdfWriter()
+            for page in reader.pages[start:start + 15]:
+                writer.add_page(page)
+            output = BytesIO()
+            writer.write(output)
+            batches.append((start, min(15, count - start), output.getvalue()))
+        return batches
 
     async def extract_from_bytes(self, content: bytes, mime_type: str) -> OCRResult:
-        """
-        Extract text from document bytes directly
+        started = time.monotonic()
+        mime_type = mime_type.split(";")[0].strip().lower()
+        if not content:
+            return OCRResult(success=False, error="Uploaded document is empty")
+        if mime_type != "application/pdf":
+            return await self._extract_batch(content, mime_type)
+        try:
+            batches = await asyncio.to_thread(self._pdf_batches, content)
+        except Exception as exc:
+            return OCRResult(success=False, error=f"Cannot read PDF: {exc}")
 
-        Args:
-            content: Document content as bytes
-            mime_type: MIME type of the document
-
-        Returns:
-            OCRResult with extracted text
-        """
-        start_time = time.time()
-
-        # Try Google Document AI first
-        if await self.google_ai.is_available():
-            result = await self.google_ai.process_document(content, mime_type)
-
-            if result.success and result.confidence >= self.confidence_threshold:
-                return result
-
-        # Try Azure fallback
-        if await self.azure_fr.is_available():
-            azure_result = await self.azure_fr.process_document(content, mime_type)
-            if azure_result.success:
-                return azure_result
-
-        # Return Google result even if below threshold
-        if 'result' in locals() and result.success:
-            return result
-
+        results = []
+        tables = []
+        for offset, count, batch in batches:
+            logger.info("OCR batch started", first_page=offset + 1, last_page=offset + count)
+            result = await self._extract_batch(batch, mime_type, expected_pages=count)
+            if not result.success:
+                return OCRResult(
+                    success=False,
+                    error=f"OCR failed for pages {offset + 1}-{offset + count}: {result.error}",
+                    processing_time_ms=int((time.monotonic() - started) * 1000),
+                )
+            results.append(result)
+            tables.extend({**table, "page": table.get("page", 1) + offset} for table in result.tables)
+        page_count = sum(result.page_count for result in results)
         return OCRResult(
-            success=False,
-            error="All OCR providers failed",
-            processing_time_ms=int((time.time() - start_time) * 1000)
+            success=True,
+            text="\n\n".join(result.text for result in results),
+            confidence=sum(result.confidence * result.page_count for result in results) / page_count,
+            provider="+".join(dict.fromkeys(result.provider for result in results)),
+            page_count=page_count,
+            tables=tables,
+            page_texts=[text for result in results for text in result.page_texts],
+            page_confidences=[value for result in results for value in result.page_confidences],
+            processing_time_ms=int((time.monotonic() - started) * 1000),
         )
+
+    async def _extract_batch(self, content: bytes, mime_type: str, expected_pages=None) -> OCRResult:
+        errors = []
+        candidates = []
+        for provider in (self.google_ai, self.azure_fr):
+            try:
+                if not await provider.is_available():
+                    errors.append(f"{provider.name}: not configured")
+                    continue
+                result = await provider.process_document(content, mime_type)
+                if result.success and expected_pages is not None and result.page_count != expected_pages:
+                    errors.append(f"{provider.name}: returned {result.page_count} of {expected_pages} pages")
+                    continue
+                if result.success and not result.text.strip():
+                    errors.append(f"{provider.name}: no readable text found")
+                    continue
+                if result.success:
+                    candidates.append(result)
+                    if result.confidence >= self.confidence_threshold:
+                        return max(candidates, key=lambda item: item.confidence)
+                else:
+                    errors.append(f"{provider.name}: {result.error or 'unknown error'}")
+            except Exception as exc:
+                errors.append(f"{provider.name}: {exc}")
+        if candidates:
+            return max(candidates, key=lambda item: item.confidence)
+        error = "; ".join(errors)
+        logger.error("All OCR providers failed", error=error)
+        return OCRResult(success=False, error=error)
 
     async def _download_document(self, url: str) -> Tuple[Optional[bytes], str]:
         """
