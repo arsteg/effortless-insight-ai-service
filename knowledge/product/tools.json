@@ -1,0 +1,93 @@
+{
+  "$schema_note": "Assistant tool registry definition. READ tools are executed server-side by the AI service against the backend API using the asking user's forwarded JWT. CONFIRM actions are NEVER executed by the AI service - they are emitted as confirm_action events; the client app executes the call only after the user taps Confirm. Anything not listed here is forbidden (guidance only).",
+  "version": 1,
+  "read_tools": [
+    {
+      "name": "get_notices",
+      "description": "List the user's GST notices with optional filters.",
+      "method": "GET",
+      "path": "/api/v1/notices",
+      "params": { "status": "string?", "priority": "string?", "search": "string?", "gstin": "string?", "deadlineFrom": "date?", "deadlineTo": "date?", "overdue": "bool?", "dueWithinDays": "int?", "page": "int?", "pageSize": "int? (max 20 for assistant)" }
+    },
+    {
+      "name": "get_notice",
+      "description": "Get one notice's details (type, status, deadline, amounts, assignee).",
+      "method": "GET",
+      "path": "/api/v1/notices/{noticeId}",
+      "params": { "noticeId": "uuid" }
+    },
+    {
+      "name": "get_notice_report",
+      "description": "Get the AI analysis report of a notice (risk, summaries, action items). May return 402 if the plan lacks ai_explanation.",
+      "method": "GET",
+      "path": "/api/v1/notices/{noticeId}/report",
+      "params": { "noticeId": "uuid" }
+    },
+    {
+      "name": "get_notice_statistics",
+      "description": "Counts of notices by status/priority and due-soon/overdue totals.",
+      "method": "GET",
+      "path": "/api/v1/notices/statistics",
+      "params": {}
+    },
+    {
+      "name": "get_upcoming_deadlines",
+      "description": "Notices with deadlines coming up, soonest first.",
+      "method": "GET",
+      "path": "/api/v1/notices",
+      "params": { "dueWithinDays": "int (default 14)", "sortBy": "const deadline", "sortOrder": "const asc", "pageSize": "int (default 10)" }
+    },
+    {
+      "name": "get_my_tasks",
+      "description": "The user's open tasks, optionally due within a window.",
+      "method": "GET",
+      "path": "/api/v1/tasks",
+      "params": { "assignedToMe": "const true", "dueWithin": "string? (week|month)", "status": "string?" }
+    },
+    {
+      "name": "get_subscription_usage",
+      "description": "Current plan, trial status, and usage against limits (notices, seats, GSTINs, storage).",
+      "method": "GET",
+      "path": "/api/v1/usage",
+      "params": {}
+    },
+    {
+      "name": "get_members",
+      "description": "Members of the current organization (names, roles, status). Requires a role that can view members.",
+      "method": "GET",
+      "path": "/api/v1/organizations/{orgId}/members",
+      "params": { "orgId": "uuid (injected from context, never from the model)" }
+    }
+  ],
+  "confirm_actions": [
+    {
+      "kind": "auto_draft",
+      "description": "Generate an AI draft reply for a notice. Requires draft_reply feature.",
+      "method": "POST",
+      "path": "/api/v1/notices/{noticeId}/responses/auto-draft",
+      "body": { "tone": "formal|conciliatory|defensive", "language": "en|hi" }
+    },
+    {
+      "kind": "create_task",
+      "description": "Create a task on a notice.",
+      "method": "POST",
+      "path": "/api/v1/tasks",
+      "body": { "noticeId": "uuid", "title": "string", "description": "string?", "dueDate": "date?" }
+    },
+    {
+      "kind": "add_reminder",
+      "description": "Add a custom reminder on a notice.",
+      "method": "POST",
+      "path": "/api/v1/notices/{noticeId}/reminders",
+      "body": { "remindAt": "datetime", "note": "string?" }
+    },
+    {
+      "kind": "update_status",
+      "description": "Move a notice to a new status (workflow-valid transitions only).",
+      "method": "PUT",
+      "path": "/api/v1/notices/{noticeId}/status",
+      "body": { "status": "in_progress|responded|closed" }
+    }
+  ],
+  "forbidden_note": "Never tools: deletes of any kind, billing/payments, invitations or member/role changes, response approve/reject/mark-submitted, organization or GSTIN changes, admin portal, anything on the government GST portal."
+}

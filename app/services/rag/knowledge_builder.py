@@ -249,14 +249,14 @@ class KnowledgeBuilder:
         """Get knowledge base statistics"""
         async with get_session_maker()() as session:
             # Count by source type
-            from sqlalchemy import func
+            from sqlalchemy import case, func
 
             result = await session.execute(
                 select(
                     KnowledgeBaseEntry.source_type,
                     func.count(KnowledgeBaseEntry.id).label('count'),
                     func.sum(
-                        func.case((KnowledgeBaseEntry.is_indexed == True, 1), else_=0)
+                        case((KnowledgeBaseEntry.is_indexed == True, 1), else_=0)
                     ).label('indexed')
                 ).where(
                     KnowledgeBaseEntry.is_active == True

@@ -19,6 +19,7 @@ class KnowledgeSourceType(str, Enum):
     FORM_TEMPLATE = "form_template"
     FAQ = "faq"
     PROCEDURE = "procedure"
+    PRODUCT_GUIDE = "product_guide"
 
 
 class KnowledgeBaseEntry(Base, UUIDMixin, TimestampMixin):

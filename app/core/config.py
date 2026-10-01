@@ -79,6 +79,20 @@ class Settings(BaseSettings):
     # Pipeline Settings
     pipeline_timeout_seconds: int = 180
 
+    # In-app assistant (end-user chatbot)
+    assistant_enabled: bool = True
+    assistant_model: str = "gpt-4o-mini"  # cost-first default; override via ASSISTANT_MODEL
+    assistant_temperature: float = 0.3
+    assistant_max_tokens: int = 1024
+    assistant_max_tool_hops: int = 3
+    assistant_rag_top_k: int = 6
+    assistant_rag_min_similarity: float = 0.4
+    assistant_history_max_messages: int = 20
+    assistant_tool_timeout_seconds: int = 15
+    # Speech-to-text for voice input
+    transcribe_model: str = "whisper-1"
+    transcribe_max_bytes: int = 5 * 1024 * 1024  # ~2 min of compressed audio
+
     # Rate Limiting (short-term burst protection on cost-incurring endpoints)
     rate_limit_enabled: bool = True
     rate_limit_requests: int = 100

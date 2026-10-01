@@ -1,0 +1,31 @@
+{
+  "$schema_note": "Deterministic navigation targets for assistant 'navigate' actions. web = Next.js route; mobile = Expo Router route or null if web-only. Query placeholders in {braces} are optional.",
+  "version": 1,
+  "intents": {
+    "dashboard": { "label": "Dashboard", "web": "/dashboard", "mobile": "/(tabs)/" },
+    "notices_list": { "label": "Notices", "web": "/notices", "mobile": "/(tabs)/notices" },
+    "notices_overdue": { "label": "Overdue notices", "web": "/notices?overdue=true", "mobile": "/(tabs)/notices" },
+    "notices_due_soon": { "label": "Notices due soon", "web": "/notices?dueWithinDays=7", "mobile": "/(tabs)/notices" },
+    "notice_detail": { "label": "Open notice", "web": "/notices/{noticeId}", "mobile": "/notices/{noticeId}" },
+    "notice_analysis": { "label": "AI Analysis", "web": "/notices/{noticeId}?tab=analysis", "mobile": "/notices/{noticeId}?tab=analysis", "requiredFeature": "ai_explanation" },
+    "notice_response": { "label": "Response tab", "web": "/notices/{noticeId}?tab=response", "mobile": "/notices/{noticeId}?tab=response" },
+    "upload_notice": { "label": "Upload a notice", "web": "/notices/upload", "mobile": "/(tabs)/upload" },
+    "gst_sync": { "label": "GST portal sync", "web": "/gst-sync", "mobile": null, "webOnlyNote": "GST portal sync via the Chrome extension is set up on the web app." },
+    "tasks": { "label": "Tasks", "web": "/tasks", "mobile": "/(tabs)/tasks", "requiredFeature": "workflows" },
+    "calendar": { "label": "Deadline calendar", "web": "/calendar", "mobile": "/calendar" },
+    "reports": { "label": "Reports", "web": "/reports", "mobile": null, "requiredFeature": "advanced_analytics", "webOnlyNote": "Reports are available on the web app." },
+    "notifications": { "label": "Notifications", "web": "/notifications", "mobile": "/(tabs)/notifications" },
+    "team": { "label": "Team & invitations", "web": "/team", "mobile": null, "requiredFeature": "collaboration", "requiredRole": "admin", "webOnlyNote": "Team invitations are managed on the web app." },
+    "ca_clients": { "label": "Client workspace", "web": "/clients/invite", "mobile": null, "caOnly": true, "webOnlyNote": "The CA client workspace is on the web app." },
+    "support": { "label": "Support", "web": "/support", "mobile": "/support" },
+    "settings": { "label": "Settings", "web": "/settings", "mobile": "/(tabs)/profile" },
+    "settings_profile": { "label": "Profile settings", "web": "/settings/profile", "mobile": "/settings/edit-profile" },
+    "settings_security": { "label": "Security settings", "web": "/settings/security", "mobile": "/settings/change-password" },
+    "settings_organization": { "label": "Organization & GSTINs", "web": "/settings/organization", "mobile": null, "requiredRole": "admin", "webOnlyNote": "Organization and GSTIN settings are on the web app." },
+    "settings_billing": { "label": "Billing & plan", "web": "/settings/billing", "mobile": "/billing" },
+    "select_plan": { "label": "Choose a plan", "web": "/select-plan", "mobile": "/billing/plans" },
+    "settings_notifications": { "label": "Notification preferences", "web": "/settings/notifications", "mobile": "/settings/notifications" },
+    "settings_integrations": { "label": "GSTN integration", "web": "/settings/integrations", "mobile": "/settings/integrations" },
+    "settings_whatsapp": { "label": "WhatsApp assistant", "web": "/settings/whatsapp", "mobile": null, "requiredFeature": "whatsapp_assistant", "webOnlyNote": "WhatsApp linking is set up on the web app." }
+  }
+}

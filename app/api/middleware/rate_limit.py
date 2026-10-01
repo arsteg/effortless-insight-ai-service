@@ -44,7 +44,7 @@ logger = structlog.get_logger()
 
 # Cost-incurring endpoints are mounted under these prefixes. Only POSTs are
 # limited — GETs here (e.g. /embeddings/stats) do not call the LLM.
-COST_PATH_PREFIXES = ("/api/v1/process", "/api/v1/embeddings")
+COST_PATH_PREFIXES = ("/api/v1/process", "/api/v1/embeddings", "/api/v1/assistant")
 
 GLOBAL_BUCKET = "__global__"
 # ~40 days: comfortably longer than any calendar month so a month's counter
