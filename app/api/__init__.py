@@ -14,3 +14,6 @@ router.include_router(process.router, prefix="/process", tags=["Processing"])
 router.include_router(embeddings.router, prefix="/embeddings", tags=["Embeddings"])
 router.include_router(admin.router, prefix="/admin", tags=["Admin"])
 router.include_router(assistant.router, prefix="/assistant", tags=["Assistant"])
+
+from app.api.endpoints import email_notices
+router.include_router(email_notices.router, prefix="/email-notices", tags=["Email notice inspection"])
