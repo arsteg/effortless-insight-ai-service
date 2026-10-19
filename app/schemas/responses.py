@@ -106,6 +106,9 @@ class NoticeMetadata(CamelCaseModel):
     tax_amount: Optional[float] = Field(None, description="Tax amount in dispute")
     penalty_amount: Optional[float] = Field(None, description="Penalty amount")
     interest_amount: Optional[float] = Field(None, description="Interest amount")
+    late_fee_amount: Optional[float] = Field(None, description="Late fee/late filing fee amount")
+    cess_amount: Optional[float] = Field(None, description="Compensation cess amount")
+    other_charges_amount: Optional[float] = Field(None, description="Other charges/miscellaneous amount")
     period_from: Optional[date] = Field(None, description="Start of tax period")
     period_to: Optional[date] = Field(None, description="End of tax period")
     issuing_authority: Optional[str] = Field(None, description="Issuing authority name")
@@ -120,7 +123,7 @@ class NoticeMetadata(CamelCaseModel):
             return None
         return v
 
-    @field_validator('tax_amount', 'penalty_amount', 'interest_amount', mode='before')
+    @field_validator('tax_amount', 'penalty_amount', 'interest_amount', 'late_fee_amount', 'cess_amount', 'other_charges_amount', mode='before')
     @classmethod
     def parse_null_float(cls, v):
         """Handle LLM returning 'null' as string instead of JSON null"""
@@ -142,10 +145,44 @@ class NoticeMetadata(CamelCaseModel):
         return v
 
 
+class RiskAssessmentData(CamelCaseModel):
+    """Risk assessment breakdown for API response"""
+    score: int = Field(..., ge=0, le=100, description="Overall risk score")
+    level: str = Field(..., description="Risk level: low, medium, high, critical")
+    notice_category_score: int = Field(0, description="Risk from notice category")
+    tax_amount_score: int = Field(0, description="Risk from tax amount")
+    deadline_urgency_score: int = Field(0, description="Risk from deadline urgency")
+    penalty_potential_score: int = Field(0, description="Risk from penalty potential")
+    prior_history_score: int = Field(0, description="Risk from prior history")
+    complexity_score: int = Field(0, description="Risk from notice complexity")
+    reasoning: List[str] = Field(default_factory=list, description="Detailed reasoning for risk classification")
+
+
+class CalculationDiscrepancyData(CamelCaseModel):
+    """Calculation discrepancy for API response"""
+    field: str = Field(..., description="Field with discrepancy (e.g., 'total_demand')")
+    expected: float = Field(..., description="Expected calculated value")
+    actual: float = Field(..., description="Actual value from notice")
+    difference: float = Field(..., description="Difference between expected and actual")
+    message: str = Field(..., description="Human-readable description of the discrepancy")
+    severity: str = Field("warning", description="Severity: 'warning' or 'error'")
+
+
+class PreFilingChecklistItemData(CamelCaseModel):
+    """Pre-filing checklist item for API response"""
+    category: str = Field(..., description="Category: limitation, documents, calculations, deadlines, procedural, compliance")
+    item: str = Field(..., description="Description of the checklist item")
+    status: str = Field(..., description="Status: pass, warning, fail, unknown")
+    details: Optional[str] = Field(None, description="Additional details or explanation")
+    priority: int = Field(1, description="Priority: 1=critical, 2=important, 3=informational")
+
+
 class AiReportData(CamelCaseModel):
     """Complete AI analysis report"""
     risk_score: int = Field(..., ge=0, le=100, description="Risk score 0-100")
     risk_level: str = Field(..., description="Risk level: low, medium, high, critical")
+    risk_factors: List[str] = Field(default_factory=list, description="Human-readable risk factors explaining the risk classification")
+    risk_assessment: Optional[RiskAssessmentData] = Field(None, description="Detailed risk assessment breakdown")
     summary_en: str = Field(..., description="Executive summary in English")
     summary_hi: str = Field(..., description="Summary in Hindi")
     plain_english: str = Field(..., description="Plain English explanation")
@@ -154,6 +191,8 @@ class AiReportData(CamelCaseModel):
     required_documents: List[RequiredDocument] = Field(default_factory=list, description="Required documents")
     legal_references: List[LegalReference] = Field(default_factory=list, description="Relevant legal references")
     confidence_scores: Dict[str, int] = Field(default_factory=dict, description="Confidence scores for each field")
+    calculation_discrepancies: List[CalculationDiscrepancyData] = Field(default_factory=list, description="Calculation discrepancies found")
+    prefiling_checklist: List[PreFilingChecklistItemData] = Field(default_factory=list, description="Pre-filing review checklist")
     disclaimer: str = Field(default=AI_DISCLAIMER, description="Fixed AI-usage disclaimer (not model-generated)")
 
     @field_validator('risk_score', mode='before')

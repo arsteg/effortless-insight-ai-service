@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Tuple
 import structlog
 
 from app.schemas.entities import ExtractedEntities
-from app.schemas.report import VerificationResult, ConfidenceScores
+from app.schemas.report import VerificationResult, ConfidenceScores, CalculationDiscrepancy
 from app.schemas.internal import VerificationOutput
 from app.services.verification.fact_checker import FactChecker
 from app.services.verification.hallucination_detector import HallucinationDetector
@@ -61,14 +61,18 @@ class Verifier:
             original_text, llm_output
         )
 
-        # 3. Build verification result
+        # 3. Verify calculations
+        calculation_discrepancies = self._verify_calculations(entities)
+
+        # 4. Build verification result
         verification = VerificationResult(
-            is_verified=facts_valid and len(hallucinations) == 0,
+            is_verified=facts_valid and len(hallucinations) == 0 and len(calculation_discrepancies) == 0,
             issues=issues,
             warnings=warnings,
             potential_hallucinations=hallucinations,
+            calculation_discrepancies=calculation_discrepancies,
             deadline_verified=not any("deadline" in i.lower() for i in warnings),
-            amounts_verified=not any("amount" in i.lower() for i in issues),
+            amounts_verified=not any("amount" in i.lower() for i in issues) and len(calculation_discrepancies) == 0,
             sections_valid=not any("section" in i.lower() or "rule" in i.lower() for i in warnings),
             gstin_valid=not any("gstin" in i.lower() for i in issues),
             dates_consistent=not any("date" in i.lower() for i in issues),
@@ -156,6 +160,100 @@ class Verifier:
             adjustments.append("Action items may contain unverified information")
 
         return adjustments
+
+    def _verify_calculations(
+        self,
+        entities: ExtractedEntities,
+    ) -> List[CalculationDiscrepancy]:
+        """
+        Verify that demand calculations add up correctly.
+
+        Checks:
+        - Tax + Penalty + Interest = Total (if all present)
+        - Individual amounts are non-negative
+        - Amounts are reasonable (not obviously OCR errors)
+
+        Returns:
+            List of CalculationDiscrepancy objects
+        """
+        discrepancies = []
+
+        tax = entities.tax_amount
+        penalty = entities.penalty_amount
+        interest = entities.interest_amount
+        late_fee = entities.late_fee_amount
+        cess = entities.cess_amount
+        other_charges = entities.other_charges_amount
+        total = entities.total_amount
+
+        # Check if individual amounts are non-negative
+        amount_fields = [
+            ("tax_amount", tax),
+            ("penalty_amount", penalty),
+            ("interest_amount", interest),
+            ("late_fee_amount", late_fee),
+            ("cess_amount", cess),
+            ("other_charges_amount", other_charges),
+        ]
+
+        for field_name, amount in amount_fields:
+            if amount is not None and amount < 0:
+                discrepancies.append(CalculationDiscrepancy(
+                    field=field_name,
+                    expected=0.0,
+                    actual=amount,
+                    difference=abs(amount),
+                    message=f"{field_name.replace('_', ' ').title()} is negative, which is invalid",
+                    severity="error"
+                ))
+
+        # Check if Tax + Penalty + Interest + Late Fee + Cess + Other = Total (with tolerance)
+        if total is not None:
+            # Calculate expected total from components
+            components_sum = 0.0
+            has_components = False
+
+            for field_name, amount in amount_fields:
+                if amount is not None and amount > 0:
+                    components_sum += amount
+                    has_components = True
+
+            if has_components:
+                difference = abs(total - components_sum)
+                # Allow 1% tolerance or Rs. 1 tolerance for rounding
+                tolerance = max(total * 0.01, 1.0)
+
+                if difference > tolerance:
+                    discrepancies.append(CalculationDiscrepancy(
+                        field="total_demand",
+                        expected=components_sum,
+                        actual=total,
+                        difference=difference,
+                        message=f"Total demand (₹{total:,.2f}) does not match sum of components (₹{components_sum:,.2f}). Difference: ₹{difference:,.2f}",
+                        severity="warning" if difference < total * 0.1 else "error"
+                    ))
+
+        # Check for obviously unreasonable amounts (potential OCR errors)
+        all_amounts = amount_fields + [("total_amount", total)]
+        for field_name, amount in all_amounts:
+            if amount is not None:
+                # Amounts over 1000 crore are suspicious
+                if amount > 10_000_000_000:
+                    discrepancies.append(CalculationDiscrepancy(
+                        field=field_name,
+                        expected=0.0,
+                        actual=amount,
+                        difference=amount,
+                        message=f"{field_name.replace('_', ' ').title()} of ₹{amount:,.2f} seems unusually high. Please verify.",
+                        severity="warning"
+                    ))
+
+        logger.info(
+            "Calculation verification complete",
+            discrepancies_found=len(discrepancies)
+        )
+
+        return discrepancies
 
     async def quick_verify(
         self,

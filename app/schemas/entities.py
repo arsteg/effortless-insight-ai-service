@@ -25,6 +25,9 @@ class AmountType(str, Enum):
     INTEREST = "interest"
     TOTAL = "total"
     REFUND = "refund"
+    LATE_FEE = "late_fee"
+    CESS = "cess"
+    OTHER_CHARGES = "other_charges"
     OTHER = "other"
 
 
@@ -84,6 +87,9 @@ class ExtractedEntities(BaseModel):
     penalty_amount: Optional[float] = Field(None, description="Penalty amount")
     interest_amount: Optional[float] = Field(None, description="Interest amount")
     total_amount: Optional[float] = Field(None, description="Total demand")
+    late_fee_amount: Optional[float] = Field(None, description="Late fee/late filing fee amount")
+    cess_amount: Optional[float] = Field(None, description="Compensation cess amount")
+    other_charges_amount: Optional[float] = Field(None, description="Other charges/miscellaneous amount")
 
     # Notice identification
     notice_number: Optional[str] = Field(None, description="Notice reference number")

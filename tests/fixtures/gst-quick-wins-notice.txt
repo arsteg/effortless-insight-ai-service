@@ -1,0 +1,39 @@
+FICTIONAL SOFTWARE TEST DOCUMENT - NOT AN OFFICIAL NOTICE
+
+FORM GST DRC-01 - SAMPLE SHOW CAUSE NOTICE
+Notice Number: TEST/DRC-01/2026/0001
+Issue Date: 19/10/2026
+Taxpayer: Example Test Manufacturing Private Limited
+GSTIN: REPLACE_WITH_YOUR_REGISTERED_TEST_GSTIN
+Issuing Authority: Test GST Division, Sample Jurisdiction
+Officer: Test Officer (fictional)
+
+Subject: Proposed demand concerning input tax credit reconciliation
+Tax period: 01/04/2022 to 31/03/2023
+Provision cited in this fictional fixture: Section 73 of the CGST Act.
+
+The sample reconciliation identifies an alleged difference between input tax
+credit claimed in GSTR-3B and supporting purchase records. Submit an explanation
+and supporting records. This is a proposed demand, not a final adjudication order.
+
+Demand breakdown (INR):
+Tax amount: Rs. 10,00,000.00
+Penalty amount: Rs. 1,00,000.00
+Interest amount: Rs. 50,000.00
+Late fee: Rs. 2,000.00
+Compensation cess: Rs. 3,000.00
+Other charges: Rs. 1,000.00
+Total demand: Rs. 15,00,000.00
+
+Response deadline: 22/10/2026
+Personal hearing: 23/10/2026
+
+Documents requested:
+1. GSTR-3B returns and GSTR-2B reconciliation for the stated period.
+2. Purchase register, invoices and evidence of receipt of goods.
+3. Electronic credit ledger and payment challans.
+4. Written explanation of disputed credit and the demand calculation.
+
+The taxpayer disputes the calculation and requests a component-wise explanation.
+No reply has yet been filed. No final order or appeal communication date is supplied.
+The listed charges and provision are synthetic inputs for software testing only.

@@ -73,6 +73,9 @@ Provide your analysis in JSON format with the following structure:
         "tax_amount": <number or null>,
         "penalty_amount": <number or null>,
         "interest_amount": <number or null>,
+        "late_fee_amount": <number or null>,
+        "cess_amount": <number or null>,
+        "other_charges_amount": <number or null>,
         "period_from": "<YYYY-MM-DD or null>",
         "period_to": "<YYYY-MM-DD or null>",
         "issuing_authority": "<authority name or null>",
@@ -146,6 +149,9 @@ Respond in JSON format:
         "tax_amount": <number or null>,
         "penalty_amount": <number or null>,
         "interest_amount": <number or null>,
+        "late_fee_amount": <number or null>,
+        "cess_amount": <number or null>,
+        "other_charges_amount": <number or null>,
         "issuing_authority": "<issuing office/designation or null>",
         "officer_name": "<name of the signing officer or null>",
         "contact_details": "<phone numbers/emails given for queries or null>"
@@ -240,6 +246,49 @@ Key Risk Factors:
 {risk_factors}
 
 Provide a 2-3 sentence explanation of what this means and what action to take."""
+
+    # Handover summary prompts
+    HANDOVER_SUMMARY_SYSTEM = """You are a senior tax consultant creating a handover summary for a GST case transfer.
+Your task is to generate a concise but comprehensive handover document that enables a new team member
+to quickly understand the case and continue work without disruption.
+
+Be factual, professional, and action-oriented. Focus on what matters most for continuity."""
+
+    HANDOVER_SUMMARY_USER = """Generate a handover summary for this GST notice case:
+
+NOTICE DETAILS:
+- Notice ID: {notice_id}
+- Type: {notice_type}
+- Category: {notice_category}
+- Status: {current_status}
+- Risk Level: {risk_level}
+- Response Deadline: {response_deadline}
+- Currently Assigned To: {assigned_to}
+
+AI ANALYSIS SUMMARY:
+{notice_summary}
+
+ACTIVITY HISTORY:
+{activity_history}
+
+ADDITIONAL CONTEXT:
+{additional_context}
+
+Generate a handover summary in the following JSON format:
+{{
+    "background": "<Brief overview of the case - what is this notice about, key issues, and current situation>",
+    "work_completed": ["<action 1>", "<action 2>", ...],
+    "pending_items": ["<pending item 1>", "<pending item 2>", ...],
+    "next_steps": ["<recommended action 1>", "<recommended action 2>", ...],
+    "key_deadlines": [
+        {{"date": "<YYYY-MM-DD>", "description": "<what's due>"}},
+        ...
+    ],
+    "key_contacts": ["<contact 1 if any>", ...],
+    "risk_summary": "<1-2 sentence risk summary>"
+}}
+
+Focus on actionable information. If activity history is limited, focus on recommended next steps based on the notice type and status."""
 
     @classmethod
     def format_rag_context(cls, rag_context) -> str:

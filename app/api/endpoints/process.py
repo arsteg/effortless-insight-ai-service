@@ -26,6 +26,7 @@ from app.schemas.responses import (
     SimilarNoticesResponse,
     SimilarNotice,
 )
+from app.schemas.handover import HandoverRequest, HandoverResponse
 from app.services.pipeline.orchestrator import PipelineOrchestrator
 from app.services.rag.vector_store import VectorStore
 from app.services.llm.analyzer import NoticeAnalyzer
@@ -343,3 +344,56 @@ async def find_similar_notices(
             error=str(e)
         )
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/handover-summary", response_model=HandoverResponse)
+async def generate_handover_summary(
+    request: HandoverRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Generate a handover summary for a GST notice case transfer.
+
+    This endpoint generates a comprehensive handover document that includes:
+    - Case background and key issues
+    - Work already completed
+    - Pending items and next steps
+    - Key deadlines
+    - Risk summary
+
+    Request body:
+    - notice_id: ID of the notice
+    - notice_summary: AI summary of the notice
+    - notice_type: Type of notice
+    - activity_history: List of activities on the case
+    - current_status: Current status
+    - additional_context: Any additional context
+
+    Returns:
+    - success: Whether generation succeeded
+    - summary: Generated handover summary
+    - processing_time_ms: Time taken to generate
+    """
+    logger.info(
+        "Generating handover summary",
+        notice_id=request.notice_id,
+    )
+
+    try:
+        from app.services.llm.handover_generator import HandoverGenerator
+
+        generator = HandoverGenerator()
+        result = await generator.generate(request)
+
+        return result
+
+    except Exception as e:
+        logger.error(
+            "Handover summary generation failed",
+            notice_id=request.notice_id,
+            error=str(e)
+        )
+        return HandoverResponse(
+            success=False,
+            error=str(e)
+        )

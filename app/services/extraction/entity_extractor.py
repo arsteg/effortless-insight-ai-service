@@ -59,7 +59,8 @@ class EntityExtractor:
 
         # Extract amounts
         amounts = self.amount_extractor.extract_amounts(text)
-        tax_amount, penalty_amount, interest_amount, total_amount = \
+        (tax_amount, penalty_amount, interest_amount, total_amount,
+         late_fee_amount, cess_amount, other_charges_amount) = \
             self.amount_extractor.identify_primary_amounts(amounts)
         logger.debug(f"Found {len(amounts)} amounts")
 
@@ -100,6 +101,9 @@ class EntityExtractor:
             penalty_amount=penalty_amount,
             interest_amount=interest_amount,
             total_amount=total_amount,
+            late_fee_amount=late_fee_amount,
+            cess_amount=cess_amount,
+            other_charges_amount=other_charges_amount,
             notice_number=notice_number,
             arn=arn,
             din=din,
