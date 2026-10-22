@@ -216,6 +216,7 @@ class AiProcessingResult(CamelCaseModel):
     success: bool = Field(..., description="Whether processing succeeded")
     error: Optional[str] = Field(None, description="Error message if failed")
     report: Optional[AiReportData] = Field(None, description="AI analysis report")
+    raw_text: Optional[str] = Field(None, description="Complete OCR transcript for subsequent allegation extraction")
 
 
 class SimilarNotice(CamelCaseModel):

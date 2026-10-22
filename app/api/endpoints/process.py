@@ -5,6 +5,9 @@ This module provides:
 - /notice - Process a GST notice through the AI pipeline
 - /generate-response - Generate AI-powered draft response
 - /similar - Find similar notices using vector similarity
+- /extract-allegations - Extract allegations from notice
+- /allegation-wise-draft - Generate point-wise responses to allegations
+- /regenerate-allegation-response - Regenerate single allegation response
 """
 
 import time
@@ -19,6 +22,9 @@ from app.schemas.requests import (
     ProcessNoticeRequest,
     GenerateResponseRequest,
     SimilarNoticesRequest,
+    ExtractAllegationsRequest,
+    GenerateAllegationWiseDraftRequest,
+    RegenerateAllegationResponseRequest,
 )
 from app.schemas.responses import (
     AiProcessingResult,
@@ -26,10 +32,17 @@ from app.schemas.responses import (
     SimilarNoticesResponse,
     SimilarNotice,
 )
+from app.schemas.allegations import (
+    Allegation,
+    AllegationResponse,
+    AllegationExtractionResult,
+    AllegationWiseDraftResponse,
+)
 from app.schemas.handover import HandoverRequest, HandoverResponse
 from app.services.pipeline.orchestrator import PipelineOrchestrator
 from app.services.rag.vector_store import VectorStore
 from app.services.llm.analyzer import NoticeAnalyzer
+from app.services.extraction.allegation_extractor import AllegationExtractor
 from app.api.middleware.metrics import (
     record_processing_complete,
     record_risk_score,
@@ -397,3 +410,316 @@ async def generate_handover_summary(
             success=False,
             error=str(e)
         )
+
+
+@router.post("/extract-allegations", response_model=AllegationExtractionResult)
+async def extract_allegations(
+    request: ExtractAllegationsRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Extract individual allegations from a GST notice.
+
+    This endpoint identifies and extracts each distinct allegation/charge
+    raised in a GST notice, including:
+    - Allegation description and category
+    - Legal provision cited
+    - Amount involved
+    - Tax period
+    - Evidence cited by department
+
+    Request body:
+    - noticeId: UUID of the notice
+    - noticeText: Optional OCR text (fetched from DB if not provided)
+
+    Returns:
+    - success: Whether extraction succeeded
+    - allegations: List of extracted allegations
+    - totalAmount: Sum of all allegation amounts
+    - metadata: Processing metadata
+    """
+    logger.info(
+        "Extracting allegations from notice",
+        notice_id=str(request.notice_id),
+    )
+
+    try:
+        extractor = AllegationExtractor()
+
+        # Get notice text from request or fetch from database
+        notice_text = request.notice_text
+        if not notice_text:
+            notice_data = await _fetch_notice_text(db, request.notice_id)
+            if not notice_data or not notice_data.get("text"):
+                return AllegationExtractionResult(
+                    success=False,
+                    error="Notice text not found. Please provide noticeText in the request.",
+                )
+            notice_text = notice_data["text"]
+
+        result = await extractor.extract_allegations(notice_text)
+
+        logger.info(
+            "Allegation extraction complete",
+            notice_id=str(request.notice_id),
+            count=len(result.allegations) if result.success else 0,
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(
+            "Allegation extraction failed",
+            notice_id=str(request.notice_id),
+            error=str(e)
+        )
+        return AllegationExtractionResult(
+            success=False,
+            error=str(e)
+        )
+
+
+@router.post("/allegation-wise-draft", response_model=AllegationWiseDraftResponse)
+async def generate_allegation_wise_draft(
+    request: GenerateAllegationWiseDraftRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Generate point-wise draft responses for each allegation in a notice.
+
+    This endpoint creates structured responses for each allegation, including:
+    - Response text addressing the specific issue
+    - Legal basis citations
+    - Supporting evidence references
+    - Missing information identification
+    - Case law references (optional)
+    - Combined draft document
+
+    Request body:
+    - noticeId: UUID of the notice
+    - allegations: Optional pre-extracted allegations
+    - tone: Response tone (formal, conciliatory, defensive)
+    - language: Response language (en, hi)
+    - allegationOverrides: Custom instructions per allegation ID
+    - includeCaseLaw: Whether to include case law references
+    - taxpayerContext: Additional context about taxpayer's situation
+
+    Returns:
+    - success: Whether generation succeeded
+    - allegations: List of allegations
+    - responses: Per-allegation responses
+    - combinedDraft: Full document combining all responses
+    - missingInfoSummary: Aggregated missing information
+    - metadata: Processing metadata
+    """
+    logger.info(
+        "Generating allegation-wise draft",
+        notice_id=str(request.notice_id),
+        tone=request.tone,
+        language=request.language,
+    )
+
+    try:
+        extractor = AllegationExtractor()
+
+        # Get allegations from request or extract from notice
+        allegations = []
+        if request.allegations:
+            # Convert request allegations to Allegation objects
+            for alg_data in request.allegations:
+                allegations.append(Allegation(
+                    id=alg_data.id,
+                    serial_number=alg_data.serial_number,
+                    description=alg_data.description,
+                    category=alg_data.category,
+                    legal_provision=alg_data.legal_provision,
+                    amount_involved=alg_data.amount_involved,
+                    period=alg_data.period,
+                    evidence_cited=alg_data.evidence_cited or [],
+                ))
+        else:
+            # Prefer the transcript supplied by the authorized API. Legacy callers
+            # may still retrieve it from the database, but never from a summary.
+            notice_text = request.notice_text
+            if not notice_text or not notice_text.strip():
+                notice_data = await _fetch_notice_text(db, request.notice_id)
+                notice_text = notice_data.get("text") if notice_data else None
+            if not notice_text or not notice_text.strip():
+                return AllegationWiseDraftResponse(
+                    success=False,
+                    error="Full notice text is unavailable. Reprocess this notice before generating an allegation-wise reply.",
+                )
+
+            extraction_result = await extractor.extract_allegations(notice_text)
+            if not extraction_result.success:
+                return AllegationWiseDraftResponse(
+                    success=False,
+                    error=f"Failed to extract allegations: {extraction_result.error}",
+                )
+            allegations = extraction_result.allegations
+
+        if not allegations:
+            return AllegationWiseDraftResponse(
+                success=False,
+                error="No allegations found in the notice.",
+            )
+
+        # Get notice details for response generation
+        notice_details = await _fetch_notice_details(db, request.notice_id)
+        notice_summary = notice_details.get("summary", "") if notice_details else ""
+        notice_type = notice_details.get("notice_type") if notice_details else None
+        deadline = notice_details.get("response_deadline") if notice_details else None
+
+        # Generate responses
+        result = await extractor.generate_allegation_responses(
+            allegations=allegations,
+            notice_summary=notice_summary,
+            notice_type=notice_type,
+            deadline=deadline,
+            tone=request.tone or "formal",
+            language=request.language or "en",
+            taxpayer_context=request.taxpayer_context,
+            allegation_overrides=request.allegation_overrides,
+            include_case_law=request.include_case_law if request.include_case_law is not None else True,
+        )
+
+        logger.info(
+            "Allegation-wise draft generation complete",
+            notice_id=str(request.notice_id),
+            allegation_count=len(allegations),
+            response_count=len(result.responses) if result.success else 0,
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(
+            "Allegation-wise draft generation failed",
+            notice_id=str(request.notice_id),
+            error=str(e)
+        )
+        return AllegationWiseDraftResponse(
+            success=False,
+            error=str(e)
+        )
+
+
+@router.post("/regenerate-allegation-response", response_model=AllegationResponse)
+async def regenerate_allegation_response(
+    request: RegenerateAllegationResponseRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Regenerate the response for a single allegation.
+
+    This endpoint allows regenerating the response for a specific allegation
+    with custom instructions, useful when the initial response needs adjustment.
+
+    Request body:
+    - noticeId: UUID of the notice
+    - allegation: The allegation to respond to
+    - tone: Response tone (formal, conciliatory, defensive)
+    - language: Response language (en, hi)
+    - customInstructions: Specific instructions for this allegation
+    - taxpayerContext: Additional context about taxpayer's situation
+
+    Returns:
+    - allegationId: ID of the allegation
+    - responseText: Draft response text
+    - legalBasis: Legal provisions supporting the response
+    - supportingEvidence: Referenced documents
+    - missingInformation: Information/documents still needed
+    - caseLawReferences: Relevant case law citations
+    - confidence: Confidence score (0-1)
+    - status: Response status (complete, needs_review, missing_info)
+    """
+    logger.info(
+        "Regenerating allegation response",
+        notice_id=str(request.notice_id),
+        allegation_id=request.allegation.id,
+    )
+
+    try:
+        extractor = AllegationExtractor()
+
+        # Get notice details
+        notice_details = await _fetch_notice_details(db, request.notice_id)
+        notice_type = notice_details.get("notice_type") if notice_details else None
+
+        # Convert request allegation to Allegation object
+        allegation = Allegation(
+            id=request.allegation.id,
+            serial_number=request.allegation.serial_number,
+            description=request.allegation.description,
+            category=request.allegation.category,
+            legal_provision=request.allegation.legal_provision,
+            amount_involved=request.allegation.amount_involved,
+            period=request.allegation.period,
+            evidence_cited=request.allegation.evidence_cited or [],
+        )
+
+        result = await extractor.regenerate_single_response(
+            allegation=allegation,
+            notice_type=notice_type,
+            tone=request.tone or "formal",
+            language=request.language or "en",
+            taxpayer_context=request.taxpayer_context,
+            custom_instructions=request.custom_instructions,
+        )
+
+        logger.info(
+            "Allegation response regeneration complete",
+            notice_id=str(request.notice_id),
+            allegation_id=request.allegation.id,
+            confidence=result.confidence,
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(
+            "Allegation response regeneration failed",
+            notice_id=str(request.notice_id),
+            allegation_id=request.allegation.id,
+            error=str(e)
+        )
+        raise HTTPException(status_code=502, detail="Unable to regenerate allegation response. Please retry.") from e
+
+
+async def _fetch_notice_text(db: AsyncSession, notice_id: UUID) -> dict | None:
+    """
+    Fetch notice OCR text from database.
+
+    Returns notice text for allegation extraction.
+    """
+    try:
+        from sqlalchemy import text
+
+        query = text("""
+            SELECT
+                COALESCE(NULLIF(n."OcrText", ''), ar."FullReportJson"->>'raw_text') as raw_text,
+                ar."SummaryEn" as summary
+            FROM "Notices" n
+            LEFT JOIN "NoticeAiReports" ar ON ar."NoticeId" = n."Id"
+            WHERE n."Id" = :notice_id
+            LIMIT 1
+        """)
+
+        result = await db.execute(query, {"notice_id": str(notice_id)})
+        row = result.fetchone()
+
+        if not row:
+            logger.warning("Notice not found in database", notice_id=str(notice_id))
+            return None
+
+        return {
+            "text": row.raw_text or "",
+        }
+
+    except Exception as e:
+        logger.warning(
+            "Failed to fetch notice text from database",
+            notice_id=str(notice_id),
+            error=str(e)
+        )
+        return None

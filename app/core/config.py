@@ -107,15 +107,15 @@ class Settings(BaseSettings):
     # calendar month. The caller's plan arrives in the `X-Plan` header and the
     # org in `X-Organization-Id`, both set by the .NET API. A value of 0 = "unlimited".
     #
-    # IMPORTANT: the .NET API is the AUTHORITATIVE per-plan gate — it blocks by
-    # monthly *notice* count (PlanSeeder: free=10, starter=50, professional=200,
-    # enterprise=unlimited) before it ever calls this service. These caps are a
-    # defense-in-depth BACKSTOP, so they are set ~5x the notice quota to leave
-    # headroom for the several AI calls a single notice can trigger; they must
-    # not be tighter than the notice quota or they would false-block.
+    # .NET feature/plan gates remain authoritative. These request caps are
+    # defense-in-depth backstops. Current paid plan names mirror PlanSeeder;
+    # legacy names remain supported. The global organization ceiling still applies.
     usage_caps_enabled: bool = True
     plan_monthly_request_caps: Dict[str, int] = {
-        "free": 50,
+        "free": 100,
+        "understand_respond": 1000,
+        "team": 10000,
+        "ca_operator": 0,
         "starter": 250,
         "professional": 1000,
         "enterprise": 0,   # 0 = unlimited

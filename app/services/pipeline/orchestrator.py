@@ -322,6 +322,7 @@ class PipelineOrchestrator:
             return AiProcessingResult(
                 success=True,
                 report=report.to_ai_report_data(),
+                raw_text=context.raw_text,
             )
 
         except Exception as e:

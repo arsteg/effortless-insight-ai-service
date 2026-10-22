@@ -61,3 +61,55 @@ class IndexKnowledgeRequest(BaseModel):
 
     class Config:
         populate_by_name = True
+
+
+class ExtractAllegationsRequest(BaseModel):
+    """Request model for extracting allegations from a notice"""
+    notice_id: UUID = Field(..., alias="noticeId", description="UUID of the notice")
+    notice_text: Optional[str] = Field(None, alias="noticeText", description="OCR text of the notice (optional, fetched from DB if not provided)")
+
+    class Config:
+        populate_by_name = True
+
+
+class AllegationData(BaseModel):
+    """Individual allegation data for response generation"""
+    id: str = Field(..., description="Allegation ID (e.g., ALG-001)")
+    serial_number: int = Field(..., alias="serialNumber", description="Serial number in notice")
+    description: str = Field(..., description="Allegation description")
+    category: str = Field(..., description="Category of allegation")
+    legal_provision: Optional[str] = Field(None, alias="legalProvision", description="Section/Rule cited")
+    amount_involved: Optional[float] = Field(None, alias="amountInvolved", description="Amount for this allegation")
+    period: Optional[str] = Field(None, description="Tax period")
+    evidence_cited: Optional[list[str]] = Field(None, alias="evidenceCited", description="Evidence cited by department")
+
+    class Config:
+        populate_by_name = True
+
+
+class GenerateAllegationWiseDraftRequest(BaseModel):
+    """Request model for generating allegation-wise draft responses"""
+    notice_id: UUID = Field(..., alias="noticeId", description="UUID of the notice")
+    notice_text: Optional[str] = Field(None, alias="noticeText", description="Full OCR transcript supplied by the authorized API")
+    allegations: Optional[list[AllegationData]] = Field(None, description="Pre-extracted allegations (optional)")
+    tone: Optional[str] = Field("formal", description="Tone: formal, conciliatory, defensive")
+    language: Optional[str] = Field("en", description="Language: en or hi")
+    allegation_overrides: Optional[Dict[str, str]] = Field(None, alias="allegationOverrides", description="Custom instructions per allegation ID")
+    include_case_law: Optional[bool] = Field(True, alias="includeCaseLaw", description="Include case law references")
+    taxpayer_context: Optional[Dict[str, Any]] = Field(None, alias="taxpayerContext", description="Additional taxpayer context")
+
+    class Config:
+        populate_by_name = True
+
+
+class RegenerateAllegationResponseRequest(BaseModel):
+    """Request model for regenerating a single allegation response"""
+    notice_id: UUID = Field(..., alias="noticeId", description="UUID of the notice")
+    allegation: AllegationData = Field(..., description="The allegation to respond to")
+    tone: Optional[str] = Field("formal", description="Tone: formal, conciliatory, defensive")
+    language: Optional[str] = Field("en", description="Language: en or hi")
+    custom_instructions: Optional[str] = Field(None, alias="customInstructions", description="Specific instructions for this allegation")
+    taxpayer_context: Optional[Dict[str, Any]] = Field(None, alias="taxpayerContext", description="Additional taxpayer context")
+
+    class Config:
+        populate_by_name = True
